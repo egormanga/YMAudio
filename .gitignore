@@ -1,0 +1,5 @@
+*.db
+*.log
+*.old
+*.bak
+__pycache__

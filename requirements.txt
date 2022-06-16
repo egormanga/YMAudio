@@ -1,0 +1,4 @@
+notify2~=0.3.1
+pygobject~=3.42.0
+python-vlc~=3.0.12118
+python-dbus~=1.2.18
