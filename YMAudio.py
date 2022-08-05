@@ -117,7 +117,7 @@ class MediaPlayer2(dbus.service.Object):
 
 	@dbus.service.method('org.mpris.MediaPlayer2')
 	def Quit(self):
-		self.app.popView()
+		self.app.quit()
 
 	@dbus.service.method('org.mpris.MediaPlayer2.Player')
 	def Next(self):
@@ -234,11 +234,11 @@ class PlaylistsView(SCLoadingSelectingListView, YMMenuItem):
 			if (isinstance(pl := self.l[i], yandex_music.Playlist)):
 				duration = S(" · ").join(S((pl.track_count, (self.app.strfTime(pl.duration_ms/1000) if (pl.duration_ms) else None))).filter(None))
 
-				title = S(pl.title).fit(self.w)
+				title = S(pl.title).fit(self.width)
 
 				roff = S(duration).fullwidth()
 
-				spacer = ' '*(self.w - S(title).fullwidth() - roff)
+				spacer = ' '*(self.width - S(title).fullwidth() - roff)
 
 				attrs = items[0][1]
 				color = (self._pair(pl) if (attrs & curses.A_STANDOUT) else 0)
@@ -261,7 +261,7 @@ class PlaylistsView(SCLoadingSelectingListView, YMMenuItem):
 			except IndexError: pass
 			else:
 				if (isinstance(pl, yandex_music.Playlist)):
-					self.app.w.addView(AudiosView(playlist=pl, autoplay=True))
+					self.app.win.addView(AudiosView(playlist=pl, autoplay=True))
 					ret = True
 		return ret
 
@@ -292,17 +292,17 @@ class AlbumsView(PlaylistsView):
 
 				if (flags): duration = (' ' + duration)
 
-				artists_name = a.artists_name()
-				artist = ((', '.join(artists_name) + " — ") if (artists_name) else '')
+				artist = ', '.join(a.artists_name())
+				if (artist): artist += " — "
 				subtitle = " · ".join(S((a.version, a.type, (a.genre if (a.type != 'podcast') else None))).filter(None))
 				title = (a.title + ' '*bool(subtitle))
 
 				roff = S(flags + duration).fullwidth()
-				subtitle = S(subtitle).fit(self.w - S(artist + title).fullwidth() - roff - 1)
-				artist = S(artist).fit(self.w - S(title + subtitle).fullwidth() - roff - 1)
-				title = S(title).fit(self.w - S(artist + subtitle).fullwidth() - roff - 1)
+				subtitle = S(subtitle).fit(self.width - S(artist + title).fullwidth() - roff - 1)
+				artist = S(artist).fit(self.width - S(title + subtitle).fullwidth() - roff - 1)
+				title = S(title).fit(self.width - S(artist + subtitle).fullwidth() - roff - 1)
 
-				spacer = ' '*(self.w - S(artist + title + subtitle).fullwidth() - roff)
+				spacer = ' '*(self.width - S(artist + title + subtitle).fullwidth() - roff)
 
 				attrs = items[0][1]
 				color = (self._pair(a) if (attrs & curses.A_STANDOUT) else 0)
@@ -328,7 +328,7 @@ class AlbumsView(PlaylistsView):
 			except IndexError: pass
 			else:
 				if (isinstance(a, yandex_music.Album)):
-					self.app.w.addView(AudiosView(playlist=a.with_tracks(), autoplay=True))
+					self.app.win.addView(AudiosView(playlist=a.with_tracks(), autoplay=True))
 					ret = True
 		return ret
 
@@ -364,7 +364,7 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 		return ret
 
 	def key(self, c):
-		if (c == 'n' or c == 'т'):
+		if (c.ch.casefold() in 'nт'):
 			try: t = self.l[self.n]
 			except IndexError: pass
 			else:
@@ -372,12 +372,13 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 					if (i == t):
 						del self.app.play_next[ii]
 						self.touch()
-						return
+						break
 				else:
-					self.app.playNext(t, self.l)
-					self.app.setPlaylist(self.l, self.n, self.pl_pos_min)
+					first = c.ch.isupper()
+					self.app.playNext(t, self.l, first=first)
+					if (first): self.app.setPlaylist(self.l, self.n, self.pl_pos_min)
 		elif (c == 'k' or c == 'л'):
-			self.selectAndScroll(random.randrange(len(self.l)-1))
+			self.highlightAndScroll(random.randrange(len(self.l)-1))
 		elif (c == 'b' or c == 'и'):
 			self.app.selectPlayingTrack()
 		elif (c == 'd' or c == 'в'):
@@ -394,7 +395,7 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 			try: t = self.l[self.n]
 			except IndexError: pass
 			else:
-				if (t.lyrics_available): self.app.w.addView(LyricsView(t.get_supplement().lyrics))
+				if (t.lyrics_available): self.app.win.addView(LyricsView(t.get_supplement().lyrics))
 		else: return super().key(c)
 		return True
 
@@ -441,16 +442,17 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 
 				if (flags): duration = (' ' + duration)
 
-				artist = ', '.join(t.artists_name()) + " — "
+				artist = ', '.join(t.artists_name())
+				if (artist): artist += " — "
 				subtitle = (t.version or '')
 				title = (t.title + ' '*bool(subtitle))
 
 				roff = S(queue + flags + duration).fullwidth()
-				subtitle = S(subtitle).fit(self.w - S(artist + title).fullwidth() - roff - 1)
-				artist = S(artist).fit(self.w - S(title + subtitle).fullwidth() - roff - 1)
-				title = S(title).fit(self.w - S(artist + subtitle).fullwidth() - roff - 1)
+				subtitle = S(subtitle).fit(self.width - S(artist + title).fullwidth() - roff - 1)
+				artist = S(artist).fit(self.width - S(title + subtitle).fullwidth() - roff - 1)
+				title = S(title).fit(self.width - S(artist + subtitle).fullwidth() - roff - 1)
 
-				spacer = ' '*(self.w - S(artist + title + subtitle).fullwidth() - roff)
+				spacer = ' '*(self.width - S(artist + title + subtitle).fullwidth() - roff)
 
 				attrs = items[0][1]
 				color = (self._pair(t) if (attrs & curses.A_STANDOUT) else 0)
@@ -481,7 +483,7 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 					self.app.playTrack()
 					ret = True
 				elif (isinstance(t, yandex_music.Playlist)):
-					self.app.w.addView(AudiosView(playlist=pl, autoplay=True))
+					self.app.win.addView(AudiosView(playlist=pl, autoplay=True))
 					ret = True
 		return ret
 
@@ -521,10 +523,10 @@ class ArtistsView(SCSelectingListView):
 				subtitle = " · ".join(a.genres)
 
 				roff = S(flags + duration).fullwidth()
-				subtitle = S(subtitle).fit(self.w - S(artist).fullwidth() - roff - 1)
-				artist = S(artist).fit(self.w - S(subtitle).fullwidth() - roff - 1)
+				subtitle = S(subtitle).fit(self.width - S(artist).fullwidth() - roff - 1)
+				artist = S(artist).fit(self.width - S(subtitle).fullwidth() - roff - 1)
 
-				spacer = ' '*(self.w - S(artist + subtitle).fullwidth() - roff)
+				spacer = ' '*(self.width - S(artist + subtitle).fullwidth() - roff)
 
 				attrs = items[0][1]
 				color = (self._pair(a) if (attrs & curses.A_STANDOUT) else 0)
@@ -544,6 +546,8 @@ class ArtistsView(SCSelectingListView):
 
 class SearchView(AudiosView, AlbumsView, ArtistsView, YMMenuItem):
 	class SearchPopupView(SCView):
+		transparent = True
+
 		class SearchBox(curses.textpad.Textbox):
 			def __init__(self, *args, complete=None, **kwargs):
 				super().__init__(*args, **kwargs)
@@ -654,24 +658,24 @@ class SearchView(AudiosView, AlbumsView, ArtistsView, YMMenuItem):
 			self.callback = callback
 
 		def draw(self, stdscr):
-			#if (not self.touched): return True
-			#self.touched = False
-
-			self.h, self.w = stdscr.getmaxyx()
-			eh, ew = 5, 48
-			ey, ex = (self.h-eh)//2, (self.w-ew)//2
-			ep = curses.newwin(eh, ew, ey, ex)
-			ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
-			for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
-			ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
-			ep.addstr(1, 2, self.SEARCH.center(ew-4))
-			ep.addstr(2, 2, self.QUERY)
-			ep.refresh()
-			y, x = stdscr.getbegyx()
-			search = self.SearchBox(curses.newwin(y+1, x+ew-4-len(self.QUERY), ey+2, ex+3+len(self.QUERY)), complete=self.app.search_complete)
-			query = search.edit().strip()
-			self.app.w.popView()
-			self.callback(query)
+			ret = super().draw(stdscr)
+			if (not ret):
+				eh, ew = 5, 48
+				ey, ex = (self.height-eh)//2, (self.width-ew)//2
+				ep = curses.newwin(eh, ew, ey, ex)
+				ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
+				for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
+				ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
+				ep.addstr(1, 2, self.SEARCH.center(ew-4))
+				ep.addstr(2, 2, self.QUERY)
+				ep.refresh()
+				y, x = stdscr.getbegyx()
+				search = self.SearchBox(curses.newwin(y+1, x+ew-4-len(self.QUERY), ey+2, ex+3+len(self.QUERY)), complete=self.app.search_complete)
+				query = search.edit().strip()
+				self.callback(query)
+				self.die()
+				ret = True
+			return ret
 
 	menu_label = "Поиск"
 
@@ -685,11 +689,13 @@ class SearchView(AudiosView, AlbumsView, ArtistsView, YMMenuItem):
 
 	def init(self):
 		super().init()
-		self.app.w.addView(self.SearchPopupView(self.set_query))
+		self.app.win.addView(self.SearchPopupView(self.set_query))
 		self.to_load = False
 
 	def set_query(self, query: str):
-		if (not query): self.app.w.popView()
+		if (not query):
+			self.die()
+			return
 		self.query = query
 		self.to_load = True
 
@@ -698,7 +704,7 @@ class SearchView(AudiosView, AlbumsView, ArtistsView, YMMenuItem):
 		if (not ret):
 			l = []
 			try:
-				if (self.search is None): self.search = self.app.ym.search(self.query) # TODO FIXME: type_='track'
+				if (self.search is None): self.search = self.app.ym.search(self.query)
 				#else: self.search = self.search.next_page() # TODO FIXME: TypeError
 			except (yandex_music.exceptions.BadRequestError): pass
 			else:
@@ -738,7 +744,7 @@ class MenuRecommsView(AudiosView):
 		if (not ret):
 			if (isinstance(t := self.l[i], type) and issubclass(t, YMMenuItem)):
 				attrs = items[0][1]
-				text = S(f" * {t.menu_label}").fit(self.w)
+				text = S(f" * {t.menu_label}").fit(self.width)
 				items = [(text, attrs)]
 		return (ret, items)
 
@@ -750,7 +756,7 @@ class MenuRecommsView(AudiosView):
 			else:
 				if (self.is_empty(self.n)): pass
 				elif (isinstance(t, type) and issubclass(t, YMMenuItem)):
-					self.app.w.addView(t())
+					self.app.win.addView(t())
 					ret = True
 				elif (isinstance(t, yandex_music.Track)):
 					if (self.app.playlist is not self.l): self.app.ym.rotor_station_feedback_radio_started(self.station, self.from_)
@@ -778,39 +784,41 @@ class MenuRecommsView(AudiosView):
 		self.n = self.pl_pos_min
 
 class LyricsView(SCView):
+	transparent = True
+
 	text: str
-	offset: int
+	t: int
 
 	def __init__(self, lyrics: yandex_music.Lyrics):
 		super().__init__()
 		self.lyrics = lyrics
 
 	def init(self):
+		super().init()
 		self.text = S(self.lyrics.full_lyrics)
 
 	def draw(self, stdscr):
-		if (not self.touched): return True
-		self.touched = False
-		self.h, self.w = stdscr.getmaxyx()
-		eh, ew = self.h-2, self.w-4
-		self.offset = max(0, min(self.offset, self.text.wrap(ew-3).count('\n')-eh+4))
-		ep = stdscr.subpad(eh, ew, 2, 2)
+		ret = super().draw(stdscr)
+		if (not ret):
+			eh, ew = self.height-2, self.width-4
+			self.t = max(0, min(self.t, self.text.wrap(ew-3).count('\n') - eh+4))
+			ep = stdscr.subpad(eh, ew, 2, 2)
 
-		ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
-		for i in range(1, eh-1):
-			ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
-		ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
+			ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
+			for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
+			ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
 
-		text = self.text.wrap(ew-3)
-		for ii, i in enumerate(text.split('\n')[self.offset:eh-3+self.offset]):
-			ep.addstr(ii+1, 2, i)
+			text = self.text.wrap(ew-3)
+			for ii, i in enumerate(text.split('\n')[self.t:eh-3 + self.t]):
+				ep.addstr(ii+1, 2, i)
+		return ret
 
 	def key(self, c):
 		if (c == curses.KEY_UP):
-			self.offset -= 1
+			self.t -= 1
 			self.touch()
 		elif (c == curses.KEY_DOWN):
-			self.offset += 1
+			self.t += 1
 			self.touch()
 		else: return super().key(c)
 		return True
@@ -818,32 +826,39 @@ class LyricsView(SCView):
 class ProgressView(SCView):
 	def __init__(self):
 		super().__init__()
-		self.paused = None
-		self.repeat = None
-		self.tm = None
+		self.paused = bool()
+		self.repeat = bool()
+		self.tm = str()
+
+	def init(self):
+		self.tm = time.strftime('%X')
+
+	def proc(self):
+		ret = super().proc()
+		if (not ret):
+			paused = (not self.app.p.is_playing() and self.app.p.will_play())
+			repeat = self.app.repeat
+			tm = time.strftime('%X')
+
+			if ((paused, repeat, tm) != (self.paused, self.repeat, self.tm)):
+				self.paused, self.repeat, self.tm = paused, repeat, tm
+				self.touch()
+		return ret
 
 	def draw(self, stdscr):
-		paused = (not self.app.p.is_playing() and self.app.p.will_play())
-		repeat = self.app.repeat
-		tm = time.strftime('%X')
-
-		if ((paused, repeat, tm) != (self.paused, self.repeat, self.tm)): self.touch()
-
 		ret = super().draw(stdscr)
 		if (not ret):
-			self.paused, self.repeat, self.tm = paused, repeat, tm
-
 			pl = max(0, self.app.p.get_length())
 			pt = max(0, self.app.p.get_time())
 			pp = min(1, self.app.p.get_position())
-			pgrstr = (self.app.strfTime(pt/1000), self.app.strfTime(pl/1000), tm)
-			icons = '↺'*repeat
+			pgrstr = (self.app.strfTime(pt/1000), self.app.strfTime(pl/1000), self.tm)
+			icons = '↺'*self.repeat
 			if (icons): icons = ' '+icons
-			stdscr.addstr(0, 1, S(self.app.trackline).cyclefit(self.w-2-len(icons), self.app.tl_rotate, start_delay=10).ljust(self.w-2-len(icons))+icons, curses.A_UNDERLINE)
-			stdscr.addstr(1, 1, pgrstr[0], curses.A_BLINK*paused)
+			stdscr.addstr(0, 1, S(self.app.trackline).cyclefit(self.width-2 - len(icons), self.app.tl_rotate, start_delay=10).ljust(self.width-2 - len(icons))+icons, curses.A_UNDERLINE)
+			stdscr.addstr(1, 1, pgrstr[0], curses.A_BLINK*self.paused)
 			stdscr.addstr(1, 1+len(pgrstr[0]), '/'+pgrstr[1]+' │')
-			stdscr.addstr(1, 4+len(str().join(pgrstr[:2])), Progress.format_bar(pp, 1, self.w-len(str().join(pgrstr))-4, border=''), curses.color_pair(1))
-			stdscr.addstr(1, self.w-2-len(pgrstr[-1]), '▏'+pgrstr[-1])
+			stdscr.addstr(1, 4+len(str().join(pgrstr[:2])), Progress.format_bar(pp, 1, self.width - len(str().join(pgrstr))-4, border=''), curses.color_pair(1))
+			stdscr.addstr(1, self.width-2 - len(pgrstr[-1]), '▏'+pgrstr[-1])
 			self.touch()
 		return ret
 
@@ -853,6 +868,8 @@ class LoginView(SCView):
 	PASSWORD = "Пароль:"
 	CAPTCHA = "Капча:"
 	ERROR = "Неизвестная ошибка"
+
+	transparent = True
 
 	def __init__(self, callback=None):
 		super().__init__()
@@ -890,86 +907,88 @@ class LoginView(SCView):
 	def draw(self, stdscr):
 		global ym_login, ym_pw
 
-		if (not self.touched): return True
-		self.touched = False
+		ret = super().draw(stdscr)
+		if (not ret):
+			cap = None
 
-		cap = None
-
-		l, p = ym_login, ub64(ym_pw)
-		try: t = self.app.auth.get_token(l, p)
-		except YMAuthCaptcha as ex: cap = ex
-		except YMAuthError: pass
-		else:
-			if (t is not None):
-				self.app.w.popView()
-				self.app.set_token(t)
-				self.callback()
-				return
-
-		self.h, self.w = stdscr.getmaxyx()
-		eh, ew = 7, 48
-		ey, ex = (self.h-eh)//2, (self.w-ew)//2
-
-		ep = curses.newwin(eh, ew, ey, ex)
-		ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
-		for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
-		ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
-		ep.addstr(1, 2, self.AUTHORIZATION.center(ew-4))
-		ep.addstr(2, 2, self.LOGIN)
-		ep.addstr(3, 2, self.PASSWORD)
-		ep.addstr(4, 2, self.CAPTCHA, curses.A_DIM*(cap is None))
-		ep.refresh()
-
-		y, x = stdscr.getbegyx()
-		login = self.TextBox(curses.newwin(y+1, x+ew-4-len(self.LOGIN), ey+2, ex+3+len(self.LOGIN)))
-		login.set(l)
-		password = self.PasswordBox(curses.newwin(y+1, x+ew-4-len(self.PASSWORD), ey+3, ex+3+len(self.PASSWORD)))
-		password.set(p)
-		captcha = self.TextBox(curses.newwin(y+1, x+ew-4-len(self.CAPTCHA), ey+4, ex+3+len(self.CAPTCHA)))
-
-		while (True):
-			ep.addstr(2, 2, self.LOGIN, curses.A_BOLD); ep.refresh()
-			try: l = login.edit().strip()
-			finally: ep.addstr(2, 2, self.LOGIN)
-
-			ep.addstr(3, 2, self.PASSWORD, curses.A_BOLD); ep.refresh()
-			try: p = password.edit().strip()
-			finally: ep.addstr(3, 2, self.PASSWORD)
-
-			ep.addstr(4, 2, self.CAPTCHA, curses.A_BOLD if (cap is not None) else curses.A_DIM); ep.refresh()
-			if (cap is not None):
-				webbrowser.open(cap.image_url)
-				try: c = captcha.edit().strip()
-				finally: ep.addstr(4, 2, self.CAPTCHA)
-				cap = cap.with_answer(c)
-
-			try: t = self.app.auth.get_token(l, p, cap)
-			except YMAuthError as ex:
-				if (isinstance(ex, YMAuthCaptcha)): cap = ex
-				else: raise
-				ep.addstr(1, 2, S(str(ex) or self.ERROR).fit(ew-4).center(ew-4))
-				continue
+			l, p = ym_login, ub64(ym_pw)
+			try: t = self.app.auth.get_token(l, p)
+			except YMAuthCaptcha as ex: cap = ex
+			except YMAuthError: pass
 			else:
 				if (t is not None):
-					ym_login, ym_pw = l, b64(p)
-					break
+					self.app.set_token(t)
+					self.callback()
+					self.die()
+					ret = True
+					return ret # XXX
 
-		self.app.w.popView()
-		self.app.set_token(t)
-		self.callback()
+			eh, ew = 7, 48
+			ey, ex = (self.height-eh)//2, (self.width-ew)//2
+
+			ep = curses.newwin(eh, ew, ey, ex)
+			ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
+			for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
+			ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
+			ep.addstr(1, 2, self.AUTHORIZATION.center(ew-4))
+			ep.addstr(2, 2, self.LOGIN)
+			ep.addstr(3, 2, self.PASSWORD)
+			ep.addstr(4, 2, self.CAPTCHA, curses.A_DIM*(cap is None))
+			ep.refresh()
+
+			y, x = stdscr.getbegyx()
+			login = self.TextBox(curses.newwin(y+1, x+ew-4-len(self.LOGIN), ey+2, ex+3+len(self.LOGIN)))
+			login.set(l)
+			password = self.PasswordBox(curses.newwin(y+1, x+ew-4-len(self.PASSWORD), ey+3, ex+3+len(self.PASSWORD)))
+			password.set(p)
+			captcha = self.TextBox(curses.newwin(y+1, x+ew-4-len(self.CAPTCHA), ey+4, ex+3+len(self.CAPTCHA)))
+
+			while (True):
+				ep.addstr(2, 2, self.LOGIN, curses.A_BOLD); ep.refresh()
+				try: l = login.edit().strip()
+				finally: ep.addstr(2, 2, self.LOGIN)
+
+				ep.addstr(3, 2, self.PASSWORD, curses.A_BOLD); ep.refresh()
+				try: p = password.edit().strip()
+				finally: ep.addstr(3, 2, self.PASSWORD)
+
+				ep.addstr(4, 2, self.CAPTCHA, curses.A_BOLD if (cap is not None) else curses.A_DIM); ep.refresh()
+				if (cap is not None):
+					webbrowser.open(cap.image_url)
+					try: c = captcha.edit().strip()
+					finally: ep.addstr(4, 2, self.CAPTCHA)
+					cap = cap.with_answer(c)
+
+				try: t = self.app.auth.get_token(l, p, cap)
+				except YMAuthError as ex:
+					if (isinstance(ex, YMAuthCaptcha)): cap = ex
+					else: raise
+					ep.addstr(1, 2, S(str(ex) or self.ERROR).fit(ew-4).center(ew-4))
+					continue
+				else:
+					if (t is not None):
+						ym_login, ym_pw = l, b64(p)
+						break
+
+			self.app.set_token(t)
+			self.callback()
+			self.die()
+			ret = True
+		return ret
 
 class HelpView(SCView):
+	transparent = True
+
 	def draw(self, stdscr):
-		if (not self.touched): return True
-		self.touched = False
-		self.h, self.w = stdscr.getmaxyx()
-		eh, ew = 18, 40
-		ep = stdscr.subpad(eh, ew, (self.h-eh)//2, (self.w-ew)//2)
-		ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
-		for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
-		ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
-		for ii, i in enumerate("""\
-           YMAudio: Help
+		ret = super().draw(stdscr)
+		if (not ret):
+			eh, ew = 18, 40
+			ep = stdscr.subpad(eh, ew, (self.height-eh)//2, (self.width-ew)//2)
+			ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
+			for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
+			ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
+			for ii, i in enumerate("""\
+	   YMAudio: Help
 q, esc, bspace — back
 r — toggle repeat
 p — toggle pause
@@ -983,73 +1002,85 @@ b — select playing track
 n — enqueue track
 left/right, nums — seek
 /, ^F — find
-^L — force redraw""".split('\n')): ep.addstr(ii+1, 2, i)
+^L — force redraw""".split('\n')):
+				ep.addstr(ii+1, 2, i)
+		return ret
 
 	def key(self, c):
-		self.app.w.popView()
-		self.app.w.top.touch()
+		self.die()
+		#else: return super().key(c)
 		return True
 
 class FindView(SCView): # TODO: more intuitive control?
+	transparent = True
+
+	prompt = "/"
+
 	def __init__(self):
 		super().__init__()
-		self.q = '/'
+		self.q = self.prompt
 
 	def init(self):
+		super().init()
 		self.app.top.focus = 1
 
+	def die(self):
+		super().die()
+		self.app.top.focus = 0
+
 	def draw(self, stdscr):
-		self.h, self.w = stdscr.getmaxyx()
-		stdscr.addstr(0, 0, self.q.ljust(self.w))
+		ret = super().draw(stdscr)
+		if (not ret):
+			stdscr.addstr(0, 0, self.q.ljust(self.width))
+		return ret
 
 	def key(self, c):
 		if (c in (curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT)):
-			self.app.w.top.key(c)
+			self.app.win.top.key(c)
 		elif (c == curses.ascii.DEL or c == curses.ascii.BS or c == curses.KEY_BACKSPACE):
 			self.q = self.q[:-1]
 			self.touch()
 			if (not self.q):
-				self.cancel()
 				self.app.waitkeyrelease(c)
+				self.die()
 		elif (c == curses.ascii.NL or c == curses.ascii.ESC or c == curses.KEY_EXIT):
-			self.cancel()
-			if (c == curses.ascii.NL): self.app.w.top.key(c)
+			if (c == curses.ascii.NL): self.app.win.top.key(c)
+			self.die()
 		elif (c.ch.isprintable()):
 			self.q += c.ch
 			self.touch()
 
-			q = self.q[1:]
-			for ii, t in enumerate(self.app.w.top.l[self.app.w.top.n:]): # FIXME
-				if (isinstance(t, yandex_music.Track) and any(q in (i.casefold() if (q.islower()) else i) for i in (*t.artists_name(), t.title))):
-					self.app.w.top.selectAndScroll(ii)
+			q = self.q.removeprefix(self.prompt)
+			ci = q.islower()
+			for ii, t in enumerate(self.app.win.top.l[self.app.win.top.n:]): # FIXME
+				if (isinstance(t, yandex_music.Track) and any(q in (i.casefold() if (ci) else i) for i in (*t.artists_name(), t.title))):
+					self.app.win.top.highlightAndScroll(self.app.win.top.n + ii)
 					break
+		else: return super().key(c)
 		return True
 
-	def cancel(self):
-		self.app.top.focus = 0
-		self.app.top.p[1].popView()
-		self.app.top.p[1].top.touch()
-
 class QuitView(SCView):
+	transparent = True
+
 	l, t = (), int()
 
 	def draw(self, stdscr):
-		if (not self.touched): return True
-		self.touched = False
-		self.h, self.w = stdscr.getmaxyx()
-		eh, ew = 8, 23
-		ep = stdscr.subpad(eh, ew, (self.h-eh)//2, (self.w-ew)//2)
-		ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
-		for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
-		ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
-		for ii, i in enumerate("Are you sure you\nwant to exit?\nPress back again to\nexit or select to\nstay in YMAudio.".split('\n')): ep.addstr(1+ii, 2, i.center(ew-3), curses.A_BOLD)
+		ret = super().draw(stdscr)
+		if (not ret):
+			eh, ew = 8, 23
+			ep = stdscr.subpad(eh, ew, (self.height-eh)//2, (self.width-ew)//2)
+			ep.addstr(0, 0, '╭'+'─'*(ew-2)+'╮')
+			for i in range(1, eh-1): ep.addstr(i, 0, '│'+' '*(ew-2)+'│')
+			ep.addstr(eh-2, 0, '╰'+'─'*(ew-2)+'╯')
+			for ii, i in enumerate("Are you sure you\nwant to exit?\nPress back again to\nexit or select to\nstay in YMAudio.".split('\n')):
+				ep.addstr(1+ii, 2, i.center(ew-3), curses.A_BOLD)
+		return ret
 
 	def key(self, c):
 		if (c == curses.ascii.NL):
-			self.app.w.popView()
-			self.app.w.top.touch()
+			self.die()
 		elif (c == 'q' or c == 'й' or c == curses.ascii.DEL or c == curses.ascii.BS or c == curses.ascii.ESC or c == curses.KEY_BACKSPACE or c == curses.KEY_EXIT):
-			self.app.popView()
+			self.app.die()
 		else: return super().key(c)
 		return True
 
@@ -1058,7 +1089,7 @@ class App(SCApp):
 	p: vlc.MediaPlayer
 	ym: yandex_music.Client
 	auth: '# YMAuth'
-	w: '# SCWindow'
+	win: '# SCWindow'
 	user_id: int
 	play_next: list[tuple[yandex_music.Track, yandex_music.TracksList]]
 	repeat: bool
@@ -1092,18 +1123,16 @@ class App(SCApp):
 	track: yandex_music.Track
 	trackline: str
 
-	def __del__(self):
-		self.die()
-
 	def init(self):
+		self.mouse_delay = 0
+		self.mouse_mask = (curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
 		super().init()
 
 		curses.use_default_colors()
 		try: curses.init_pair(1, curses.COLOR_WHITE, 8)
 		except curses.error: curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLACK)  # fbcon
+
 		curses.curs_set(False)
-		curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
-		curses.mouseinterval(0)
 		self.stdscr.nodelay(True)
 		self.stdscr.leaveok(True)
 
@@ -1136,48 +1165,52 @@ class App(SCApp):
 
 		self.pl_pos = -1
 
-		self.w = self.top.p[0]
+		self.win = self.top.p[0]
 
 		try: self.set_token(ym_token)
 		except yandex_music.exceptions.BadRequestError: pass
-		if (not self.user_id): self.w.addView(LoginView())
+		if (not self.user_id): self.win.addView(LoginView())
 
 	def die(self):
-		ret = super().die()
-		if (not ret):
-			try: self.stop()
-			except Exception: pass
+		super().die()
 
-			try: self.update_all()
-			except Exception: pass
-		return ret
+		try: self.stop()
+		except Exception: pass
+
+		try: self.update_all()
+		except Exception: pass
 
 	_lastproc = int()
 	_lastpb = None
 	_lastmd = None
 	_lastpos = int()
 	def proc(self):
-		if (time.time()-self._lastproc >= 0.1):
-			self._lastproc = time.time()
+		ret = super().proc()
+		if (not ret):
+			if (time.time()-self._lastproc >= 0.1):
+				self._lastproc = time.time()
 
-			pb = self.mpris.properties_org_mpris_MediaPlayer2_Player.PlaybackStatus
-			if (pb != self._lastpb):
-				self._lastpb = pb
-				self.update_properties(PlaybackStatus=pb)
+				pb = self.mpris.properties_org_mpris_MediaPlayer2_Player.PlaybackStatus
+				if (pb != self._lastpb):
+					self._lastpb = pb
+					self.update_properties(PlaybackStatus=pb)
 
-			md = self.mpris.properties_org_mpris_MediaPlayer2_Player.Metadata
-			if (md != self._lastmd):
-				self._lastmd = md
-				self.update_properties(Metadata=md)
+				md = self.mpris.properties_org_mpris_MediaPlayer2_Player.Metadata
+				if (md != self._lastmd):
+					self._lastmd = md
+					self.update_properties(Metadata=md)
 
-			pos = self.mpris.properties_org_mpris_MediaPlayer2_Player.Position
-			if (abs(pos-self._lastpos) > 500*1000):
-				self._lastpos = pos
-				if (self.p.is_playing()): self.update_properties(Position=pos)
-		if (self.p.get_length() > 0 and self.p.get_state() == vlc.State.Ended): self.playNextTrack()
+				pos = self.mpris.properties_org_mpris_MediaPlayer2_Player.Position
+				if (abs(pos-self._lastpos) > 500*1000):
+					self._lastpos = pos
+					if (self.p.is_playing()): self.update_properties(Position=pos)
+
+			if (self.p.get_length() > 0 and self.p.get_state() == vlc.State.Ended): self.playNextTrack()
+		return ret
 
 	@staticmethod
-	def strfTime(t): return time.strftime('%H:%M:%S', time.gmtime(t)).lstrip('0').lstrip(':')
+	def strfTime(t):
+		return time.strftime('%H:%M:%S', time.gmtime(t)).lstrip('0').lstrip(':')
 
 	def set_token(self, access_token: str):
 		global ym_token
@@ -1186,7 +1219,7 @@ class App(SCApp):
 		self.user_id = c.me.account.uid
 		ym_token = access_token
 		db.save(nolog=True)
-		if (isinstance(self.w.top, MenuRecommsView)): self.w.top.load()
+		if (isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
 
 	def is_liked(self, track: yandex_music.Track) -> bool:
 		if (not hasattr(track, 'liked')): track.liked = (track.track_id in self.favourites.tracks_ids)
@@ -1249,7 +1282,7 @@ class App(SCApp):
 	def playTrack(self, t=None, *, notify=True, set_pos=True):
 		if (t is None):
 			r = self.playTrack(self.playlist[self.pl_pos], set_pos=False)
-			if (self.station and isinstance(self.w.top, MenuRecommsView)): self.w.top.load()
+			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
 			return r
 
 		if (set_pos):
@@ -1290,8 +1323,8 @@ class App(SCApp):
 			return
 
 		if (not self.playlist):
-			if (not isinstance(self.w.top, AudiosView)): return
-			self.setPlaylist(self.w.top.l, pos_min=self.w.top.pl_pos_min)
+			if (not isinstance(self.win.top, AudiosView)): return
+			self.setPlaylist(self.win.top.l, pos_min=self.win.top.pl_pos_min)
 		else: self.pl_pos = max((self.pl_pos+1) % (len(self.playlist)-1), self.pl_pos_min)
 
 		while (self.pl_pos < len(self.playlist)-1):
@@ -1303,8 +1336,8 @@ class App(SCApp):
 
 	def playPrevTrack(self):
 		if (not self.playlist):
-			if (not isinstance(self.w.top, AudiosView)): return
-			self.setPlaylist(self.w.top.l, pos_min=self.w.top.pl_pos_min)
+			if (not isinstance(self.win.top, AudiosView)): return
+			self.setPlaylist(self.win.top.l, pos_min=self.win.top.pl_pos_min)
 		elif (self.pl_pos > 0): self.pl_pos = max(self.pl_pos-1, self.pl_pos_min)
 
 		while (self.pl_pos > 0):
@@ -1314,15 +1347,20 @@ class App(SCApp):
 
 		self.playTrack()
 
+	def selectPlaying(self, x):
+		for ii, i in enumerate(self.win.top.l):
+			if (i == x):
+				self.win.top.setSelection(ii)
+				self.win.top.highlightAndScroll(ii)
+				break
+
 	def selectPlayingTrack(self):
-		if (not isinstance(self.w.top, AudiosView)): return
-		for ii, i in enumerate(self.w.top.l):
-			if (i == self.track): self.w.top.selectAndScroll(ii); break
+		if (isinstance(self.win.top, AudiosView)):
+			self.selectPlaying(self.track)
 
 	def selectPlayingPlaylist(self):
-		if (not isinstance(self.w.top, PlaylistsView)): return
-		for ii, i in enumerate(self.w.top.l):
-			if (i == self.playlist): self.w.top.selectAndScroll(ii); break
+		if (isinstance(self.win.top, PlaylistsView)):
+			self.selectPlaying(self.playlist)
 
 	def play(self):
 		self.p.play()
@@ -1348,8 +1386,8 @@ class App(SCApp):
 		self.track = None
 		self.update_properties('PlaybackStatus', 'Metadata')
 
-		self.w.top.s = -1
-		self.w.top.touch()
+		self.win.top.unselect()
+		self.win.top.touch()
 		if (self.views): self.top.p[1].top.touch()
 
 	def setPosition(self, position):
@@ -1364,9 +1402,10 @@ class App(SCApp):
 		self.pl_pos = max(pos, pos_min)
 		self.station = station
 
-	def playNext(self, t: yandex_music.Track, pl: yandex_music.TracksList):
-		self.play_next.append((t, pl))
-		self.w.top.touch()
+	def playNext(self, t: yandex_music.Track, pl: yandex_music.TracksList, *, first=False):
+		if (first): self.play_next.insert(0, (t, pl))
+		else: self.play_next.append((t, pl))
+		self.win.top.touch()
 
 	def toggleRepeat(self):
 		self.repeat = not self.repeat
@@ -1443,7 +1482,9 @@ class App(SCApp):
 		t = self.track
 		if (not t): return ''
 		self.tl_rotate += 1
-		return f"{', '.join(t.artists_name())} — {t.title}"
+		artist = ', '.join(t.artists_name())
+		if (artist): artist += " — "
+		return (artist + t.title)
 
 app = App(proc_rate=10)
 
@@ -1455,19 +1496,19 @@ app = App(proc_rate=10)
 @app.onkey(curses.KEY_BACKSPACE)
 @app.onkey(curses.KEY_EXIT)
 def back(self, c):
-	if (len(self.w.views) <= 1): self.w.addView(QuitView()); return
-	self.w.popView()
+	if (len(self.win.views) <= 1): self.win.addView(QuitView())
+	else: self.win.top.die()
 
 @app.onkey('h')
 @app.onkey('р')
 @app.onkey(curses.KEY_F1)
 def help(self, c):
-	self.w.addView(HelpView())
+	self.win.addView(HelpView())
 
 @app.onkey(curses.KEY_F5)
 def reload(self, c):
-	if (isinstance(self.w.top, SCLoadingListView)):
-		self.w.top.reload()
+	if (self.win.views and isinstance(self.win.top, SCLoadingListView)):
+		self.win.top.reload()
 
 @app.onkey(curses.KEY_LEFT)
 def rew(self, c):
@@ -1519,41 +1560,41 @@ def repeat(self, c):
 
 @app.onkey('+')
 def like(self, c):
-	if (isinstance(self.w.top, AudiosView)):
-		if (self.w.top.l and isinstance(t := self.w.top.l[self.w.top.n], yandex_music.Track)):
+	if (isinstance(self.win.top, AudiosView)):
+		if (self.win.top.l and isinstance(t := self.win.top.l[self.win.top.n], yandex_music.Track)):
 			if (not self.is_liked(t)): t.liked = self.like(t)
 			else: t.liked = not self.unlike(t)
 			t.disliked = False  # resets in both cases
 
-			if (self.station and isinstance(self.w.top, MenuRecommsView)): self.w.top.load()
-			self.w.top.touch()
+			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
+			self.win.top.touch()
 
 @app.onkey('=')
 def like_and_play(self, c):
-	if (isinstance(self.w.top, AudiosView)):
-		if (self.w.top.l and isinstance(t := self.w.top.l[self.w.top.n], yandex_music.Track)):
+	if (isinstance(self.win.top, AudiosView)):
+		if (self.win.top.l and isinstance(t := self.win.top.l[self.win.top.n], yandex_music.Track)):
 			t.liked = self.like(t)
 			t.disliked = False  # resets in both cases
 
-			if (self.station and isinstance(self.w.top, MenuRecommsView)): self.w.top.load()
+			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
 
-			if (self.w.top.s != self.w.top.n): self.w.top.select()
-			self.w.top.touch()
+			if (self.win.top.s != self.win.top.n): self.win.top.select()
+			self.win.top.touch()
 
 @app.onkey('-')
 def dislike(self, c):
-	if (isinstance(self.w.top, AudiosView)):
-		if (self.w.top.l and isinstance(t := self.w.top.l[self.w.top.n], yandex_music.Track)):
+	if (isinstance(self.win.top, AudiosView)):
+		if (self.win.top.l and isinstance(t := self.win.top.l[self.win.top.n], yandex_music.Track)):
 			if (not self.is_disliked(t)): t.disliked = self.dislike(t)
 			else: t.disliked = not self.undislike(t)
 			t.liked = False  # resets in both cases
 
-			if (self.station and isinstance(self.w.top, MenuRecommsView)): self.w.top.load()
-			self.w.top.touch()
+			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
+			self.win.top.touch()
 
 @app.onkey('_')
 def dislike_and_skip(self, c):
-	if (isinstance(self.w.top, AudiosView)):
+	if (isinstance(self.win.top, AudiosView)):
 		dislike(self, c)
 		self.playNextTrack(force_next=True)
 
@@ -1566,36 +1607,42 @@ def find(self, c):
 
 @app.onkey('^L')
 def redraw(self, c):
-	self.w.top.touch()
+	self.touchAll()
 	self.stdscr.redrawwin()
 
 @app.onkey(curses.KEY_MOUSE)
 def mouse(self, c):
 	try: id, x, y, z, bstate = curses.getmouse()
-	except (curses.error, IndexError): id = x = y = z = bstate = 0
-	h, w = self.stdscr.getmaxyx()
-	if (y < h-2):
+	except (curses.error, IndexError): return
+	if (not self.win.views): return
+
+	height, width = self.stdscr.getmaxyx()
+
+	if (y < height-2):
 		if (bstate == curses.BUTTON4_PRESSED):
-			self.w.top.t = max(self.w.top.t-3, 0)
-			self.w.top.touch()
-		elif (bstate == curses.REPORT_MOUSE_POSITION or bstate == 2097152 and len(self.w.top.l) > h):
-			self.w.top.t = min(self.w.top.t+3, len(self.w.top.l)-h+2)
-			self.w.top.touch()
+			self.win.top.t = max(self.win.top.t-3, 0)
+			self.win.top.touch()
+		elif (bstate == curses.REPORT_MOUSE_POSITION or bstate == 2097152):
+			if (len(getattr(self.win.top, 'l', ())) > height):
+				self.win.top.t = min(self.win.top.t+3, len(self.win.top.l) - height+2)
+				self.win.top.touch()
+			elif (isinstance(self.win.top, LyricsView)):
+				self.win.top.t += 3
+				self.win.top.touch()
 		elif (bstate == curses.BUTTON1_PRESSED):
-			if (isinstance(self.w.top, QuitView)): self.w.popView(); return
-			n = (self.w.top.t + y)
-			if (not self.w.top.is_empty(n)):
-				self.w.top.n = n
-				if (time.time() < self.clicked): self.w.top.select(); self.clicked = True
-				self.w.top.touch()
+			if (isinstance(qw := self.win.top, QuitView)): self.key(SCKey('\n')); return
+			n = (self.win.top.t + y)
+			if (not self.win.top.is_empty(n)):
+				self.win.top.n = n
+				if (time.time() < self.clicked): self.win.top.select(); self.clicked = True
+				self.win.top.touch()
 		elif (bstate == curses.BUTTON1_RELEASED):
 			self.clicked = False if (self.clicked == True) else (time.time() + 0.2)
 		elif (bstate == curses.BUTTON3_PRESSED):
-			if (isinstance(self.w.top, QuitView)): self.popView(); return
-			back(self, c)
-	elif (y == h-2 and x >= w-2):
+			self.key(SCKey(curses.KEY_EXIT))
+	elif (y == height-2 and x >= width-2):
 		if (bstate == curses.BUTTON1_PRESSED): self.toggleRepeat()
-	elif (y == h-1):
+	elif (y == height-1):
 		if (x < 14):
 			if (bstate in (curses.BUTTON1_PRESSED, curses.BUTTON3_PRESSED, curses.BUTTON3_RELEASED)):
 				self.pause()
@@ -1604,9 +1651,9 @@ def mouse(self, c):
 			elif (bstate == curses.REPORT_MOUSE_POSITION or bstate == 2097152):
 				self.playNextTrack()
 
-		elif (x <= w-12):
+		elif (x <= width-12):
 			if (bstate == curses.BUTTON1_PRESSED):
-				self.setPosition((x-14)/(w-12-14+1))
+				self.setPosition((x-14)/(width-12-14+1))
 			elif (bstate == curses.BUTTON4_PRESSED):
 				self.seekRew()
 			elif (bstate == curses.REPORT_MOUSE_POSITION or bstate == 2097152):
