@@ -90,7 +90,7 @@ class MediaPlayer2(dbus.service.Object):
 				'mpris:length': dbus.Int64(max(0, self.app.p.get_length())*1000),
 				**(S({
 					'mpris:artUrl': self.app.get_cover(track.cover_uri),
-					'xesam:artist': track.artists_name(),
+					'xesam:artist': track.artists_name() or ('',),
 					'xesam:title': track.title,
 					'xesam:url': self.app.get_url(track),
 					'xesam:asText': self.app.get_lyrics(track),
