@@ -1210,7 +1210,7 @@ class App(SCApp):
 
 			state = self.p.get_state()
 			if (self.p.get_length() > 0 and state == vlc.State.Ended):
-				if (self._track_download_thread is None): self.playNextTrack()
+				if (not (self._track_download_thread is not None and self._track_download_thread.is_alive())): self.playNextTrack()
 			elif (state == vlc.State.Ended and self._track_download_thread is not None): self.play()
 		return ret
 
