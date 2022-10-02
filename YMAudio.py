@@ -1302,7 +1302,7 @@ class App(SCApp):
 
 						f.write(chunk)
 
-						if (noopcm is not None):
+						if (noopcm):
 							buf += chunk
 							if (buf):
 								try: os.write(fifo.fileno(), buf)
@@ -1439,6 +1439,7 @@ class App(SCApp):
 
 	def stop(self):
 		self.p.stop()
+		self.loaded = False
 
 		if (self.notify is not None): self.notify.close()
 		if (self._track_download_thread is not None): self._track_download_thread.stop()
