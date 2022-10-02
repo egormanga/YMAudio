@@ -852,12 +852,13 @@ class ProgressView(SCView):
 			pt = max(0, self.app.p.get_time())
 			pp = min(1, self.app.p.get_position())
 			pgrstr = (self.app.strfTime(pt/1000), (self.app.strfTime(max(0, pl)/1000) if (pl != 0) else '--:--'), self.tm)
+			bar = Progress.format_bar(pp, 1, self.width - len(str().join(pgrstr))-4, border='')
 			icons = '↺'*self.repeat
 			if (icons): icons = ' '+icons
 			stdscr.addstr(0, 1, S(self.app.trackline).cyclefit(self.width-2 - len(icons), self.app.tl_rotate, start_delay=10).ljust(self.width-2 - len(icons))+icons, curses.A_UNDERLINE)
 			stdscr.addstr(1, 1, pgrstr[0], curses.A_BLINK*self.paused)
 			stdscr.addstr(1, 1+len(pgrstr[0]), '/'+pgrstr[1]+' │')
-			stdscr.addstr(1, 4+len(str().join(pgrstr[:2])), Progress.format_bar(pp, 1, self.width - len(str().join(pgrstr))-4, border=''), curses.color_pair(1))
+			stdscr.addstr(1, 4+len(str().join(pgrstr[:2])), bar[:math.ceil(self.app.loaded*len(bar))], curses.color_pair(1))
 			stdscr.addstr(1, self.width-2 - len(pgrstr[-1]), '▏'+pgrstr[-1])
 			self.touch()
 		return ret
@@ -1101,6 +1102,7 @@ class App(SCApp):
 	pl_pos: int
 	pl_pos_min: int
 	pl_peer: int
+	loaded: float
 	error: None
 	clicked: bool
 	dbus: None
@@ -1284,7 +1286,7 @@ class App(SCApp):
 		return 'file://'+os.path.abspath(path)
 
 	@staticmethod
-	def _download_track(url, path, *, path_fifo=None, done_callback=None, _stop_event):
+	def _download_track(url, path, *, path_fifo=None, step_callback=None, done_callback=None, _stop_event):
 		path_part = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.part")
 		done = bool()
 		try:
@@ -1293,7 +1295,9 @@ class App(SCApp):
 				if (path_fifo is not None): buf = bytearray()
 				with open(path_part, 'wb') as f, \
 				     open(path_fifo, 'wb') if (path_fifo is not None) else noopcm as fifo:
-					for chunk in r.iter_content(chunk_size=8192):
+					chunk_size = 8192
+					length = math.ceil(int(r.headers.get('Content-Length'))/chunk_size)
+					for ii, chunk in enumerate(r.iter_content(chunk_size=chunk_size), 1):
 						if (_stop_event.is_set()): break
 
 						f.write(chunk)
@@ -1304,6 +1308,8 @@ class App(SCApp):
 								try: os.write(fifo.fileno(), buf)
 								except OSError: pass
 								else: del buf[:]
+
+						if (step_callback is not None): step_callback(ii, length)
 					else: done = True
 		finally:
 			if (done):
@@ -1335,14 +1341,18 @@ class App(SCApp):
 				if (thread := self._track_download_thread): thread.stop()
 				path_fifo = "/tmp/.YMAudio.vlc.fifo"
 				if (not os.path.exists(path_fifo)): os.mkfifo(path_fifo)
+				def _step_cb(step, length):
+					self.loaded = step/length
 				def _done_cb(path):
 					pos = self.p.get_time()
 					self.p.set_mrl(path)
 					self.p.play()
 					self.p.set_time(pos)
-				thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'done_callback': _done_cb}, daemon=True)
+				self.loaded = 0
+				thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'step_callback': _step_cb, 'done_callback': _done_cb}, daemon=True)
 				thread.start()
 				path = path_fifo
+			else: self.loaded = True
 			self.p.set_mrl(path)
 			self.play()
 		except Exception as ex:
