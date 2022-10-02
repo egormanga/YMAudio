@@ -848,10 +848,10 @@ class ProgressView(SCView):
 	def draw(self, stdscr):
 		ret = super().draw(stdscr)
 		if (not ret):
-			pl = max(0, self.app.p.get_length())
+			pl = self.app.p.get_length()
 			pt = max(0, self.app.p.get_time())
 			pp = min(1, self.app.p.get_position())
-			pgrstr = (self.app.strfTime(pt/1000), self.app.strfTime(pl/1000), self.tm)
+			pgrstr = (self.app.strfTime(pt/1000), (self.app.strfTime(max(0, pl)/1000) if (pl != 0) else '--:--'), self.tm)
 			icons = '↺'*self.repeat
 			if (icons): icons = ' '+icons
 			stdscr.addstr(0, 1, S(self.app.trackline).cyclefit(self.width-2 - len(icons), self.app.tl_rotate, start_delay=10).ljust(self.width-2 - len(icons))+icons, curses.A_UNDERLINE)
@@ -1116,6 +1116,7 @@ class App(SCApp):
 	_lastmd: ...
 	_lastpos: ...
 	_get_cover_thread: ...
+	_track_download_thread: None
 
 	# properties:
 	favourites: yandex_music.TracksList
@@ -1205,7 +1206,10 @@ class App(SCApp):
 					self._lastpos = pos
 					if (self.p.is_playing()): self.update_properties(Position=pos)
 
-			if (self.p.get_length() > 0 and self.p.get_state() == vlc.State.Ended): self.playNextTrack()
+			state = self.p.get_state()
+			if (self.p.get_length() > 0 and state == vlc.State.Ended):
+				if (self._track_download_thread is None): self.playNextTrack()
+			elif (state == vlc.State.Ended and self._track_download_thread is not None): self.play()
 		return ret
 
 	@staticmethod
@@ -1279,6 +1283,36 @@ class App(SCApp):
 				f.write(data)
 		return 'file://'+os.path.abspath(path)
 
+	@staticmethod
+	def _download_track(url, path, *, path_fifo=None, done_callback=None, _stop_event):
+		path_part = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.part")
+		done = bool()
+		try:
+			with requests.get(url, stream=True) as r:
+				r.raise_for_status()
+				if (path_fifo is not None): buf = bytearray()
+				with open(path_part, 'wb') as f, \
+				     open(path_fifo, 'wb') if (path_fifo is not None) else noopcm as fifo:
+					for chunk in r.iter_content(chunk_size=8192):
+						if (_stop_event.is_set()): break
+
+						f.write(chunk)
+
+						if (noopcm is not None):
+							buf += chunk
+							if (buf):
+								try: os.write(fifo.fileno(), buf)
+								except OSError: pass
+								else: del buf[:]
+					else: done = True
+		finally:
+			if (done):
+				os.rename(path_part, path)
+				if (done_callback is not None): done_callback(path)
+			else:
+				try: os.remove(path_part)
+				except OSError: pass
+
 	def playTrack(self, t=None, *, notify=True, set_pos=True):
 		if (t is None):
 			r = self.playTrack(self.playlist[self.pl_pos], set_pos=False)
@@ -1293,7 +1327,23 @@ class App(SCApp):
 		self.stop()
 
 		try:
-			self.p.set_mrl(self.get_url(t))
+			url = self.get_url(t)
+			cache_folder = os.path.expanduser("~/.cache/YMAudio/audio")
+			os.makedirs(cache_folder, exist_ok=True)
+			path = os.path.join(cache_folder, (self._trackline(t) + (os.path.splitext(url)[1] or '.mp3')))
+			if (not os.path.exists(path)):
+				if (thread := self._track_download_thread): thread.stop()
+				path_fifo = "/tmp/.YMAudio.vlc.fifo"
+				if (not os.path.exists(path_fifo)): os.mkfifo(path_fifo)
+				def _done_cb(path):
+					pos = self.p.get_time()
+					self.p.set_mrl(path)
+					self.p.play()
+					self.p.set_time(pos)
+				thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'done_callback': _done_cb}, daemon=True)
+				thread.start()
+				path = path_fifo
+			self.p.set_mrl(path)
 			self.play()
 		except Exception as ex:
 			if (isinstance(ex, yandex_music.exceptions.BadRequestError) and ex.name == 'session-expired'): self.user_id = None
@@ -1381,6 +1431,7 @@ class App(SCApp):
 		self.p.stop()
 
 		if (self.notify is not None): self.notify.close()
+		if (self._track_download_thread is not None): self._track_download_thread.stop()
 		if (self.station and self.track): self.ym.rotor_station_feedback_track_finished(self.station[0], self.track.track_id, self.p.get_position()/1000, self.station[1])
 
 		self.track = None
@@ -1476,15 +1527,19 @@ class App(SCApp):
 		self._track = track
 		self.update_properties('Metadata')
 
+	@staticmethod
+	def _trackline(track: yandex_music.Track) -> str:
+		artist = ', '.join(track.artists_name())
+		if (artist): artist += " — "
+		return (artist + track.title)
+
 	@property
 	def trackline(self) -> str:
 		if (self.error is not None): return f"Error: {self.error}"
 		t = self.track
 		if (not t): return ''
 		self.tl_rotate += 1
-		artist = ', '.join(t.artists_name())
-		if (artist): artist += " — "
-		return (artist + t.title)
+		return self._trackline(t)
 
 app = App(proc_rate=10)
 
