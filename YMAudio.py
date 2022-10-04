@@ -761,7 +761,7 @@ class MenuRecommsView(AudiosView):
 				elif (isinstance(t, yandex_music.Track)):
 					if (self.app.playlist is not self.l): self.app.ym.rotor_station_feedback_radio_started(self.station, self.from_)
 					self.app.setPlaylist(self.l, self.n, self.pl_pos_min, station=(self.station, self.batch_id))
-					self.app.playTrack()
+					self.app.playTrack(cache=False)
 					ret = True
 		return ret
 
@@ -1319,9 +1319,9 @@ class App(SCApp):
 				try: os.remove(path_part)
 				except OSError: pass
 
-	def playTrack(self, t=None, *, notify=True, set_pos=True):
+	def playTrack(self, t=None, *, cache=True, notify=True, set_pos=True):
 		if (t is None):
-			r = self.playTrack(self.playlist[self.pl_pos], set_pos=False)
+			r = self.playTrack(self.playlist[self.pl_pos], cache=cache, set_pos=False)
 			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
 			return r
 
@@ -1334,25 +1334,27 @@ class App(SCApp):
 
 		try:
 			url = self.get_url(t)
-			cache_folder = os.path.expanduser("~/.cache/YMAudio/audio")
-			os.makedirs(cache_folder, exist_ok=True)
-			path = os.path.join(cache_folder, (self._trackline(t) + (os.path.splitext(url)[1] or '.mp3')))
-			if (not os.path.exists(path)):
-				if (thread := self._track_download_thread): thread.stop()
-				path_fifo = "/tmp/.YMAudio.vlc.fifo"
-				if (not os.path.exists(path_fifo)): os.mkfifo(path_fifo)
-				def _step_cb(step, length):
-					self.loaded = step/length
-				def _done_cb(path):
-					pos = self.p.get_time()
-					self.p.set_mrl(path)
-					self.p.play()
-					self.p.set_time(pos)
-				self.loaded = 0
-				thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'step_callback': _step_cb, 'done_callback': _done_cb}, daemon=True)
-				thread.start()
-				path = path_fifo
-			else: self.loaded = True
+			if (cache):
+				cache_folder = os.path.expanduser("~/.cache/YMAudio/audio")
+				os.makedirs(cache_folder, exist_ok=True)
+				path = os.path.join(cache_folder, (self._trackline(t) + (os.path.splitext(url)[1] or '.mp3')))
+				if (not os.path.exists(path)):
+					if (thread := self._track_download_thread): thread.stop()
+					path_fifo = "/tmp/.YMAudio.vlc.fifo"
+					if (not os.path.exists(path_fifo)): os.mkfifo(path_fifo)
+					def _step_cb(step, length):
+						self.loaded = step/length
+					def _done_cb(path):
+						pos = self.p.get_time()
+						self.p.set_mrl(path)
+						self.p.play()
+						self.p.set_time(pos)
+					self.loaded = 0
+					thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'step_callback': _step_cb, 'done_callback': _done_cb}, daemon=True)
+					thread.start()
+					path = path_fifo
+				else: self.loaded = True
+			else: path = url; self.loaded = True
 			self.p.set_mrl(path)
 			self.play()
 		except Exception as ex:
@@ -1379,7 +1381,7 @@ class App(SCApp):
 			return
 
 		if (self.repeat and not force_next):
-			self.playTrack(self.track, notify=False)
+			self.playTrack(self.track, cache=True, notify=False)
 			return
 
 		if (not self.playlist):
