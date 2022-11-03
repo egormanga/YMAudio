@@ -121,11 +121,11 @@ class MediaPlayer2(dbus.service.Object):
 
 	@dbus.service.method('org.mpris.MediaPlayer2.Player')
 	def Next(self):
-		self.app.playNextTrack()
+		self.app.playNextTrack(highlight=False)
 
 	@dbus.service.method('org.mpris.MediaPlayer2.Player')
 	def Previous(self):
-		self.app.playPrevTrack()
+		self.app.playPrevTrack(highlight=False)
 
 	@dbus.service.method('org.mpris.MediaPlayer2.Player')
 	def Pause(self):
@@ -1162,16 +1162,16 @@ class App(SCApp):
 				self.notify.set_urgency(notify2.URGENCY_LOW)
 				self.notify.set_hint('action-icons', True)
 				self.notify.connect('closed', noop)
-				self.notify.add_action('media-skip-backward', 'Previous track', lambda *_: self.playPrevTrack())
+				self.notify.add_action('media-skip-backward', 'Previous track', lambda *_: self.playPrevTrack(highlight=False))
 				self.notify.add_action('media-playback-pause', 'Pause', lambda *_: self.playPause())
-				self.notify.add_action('media-skip-forward', 'Next track', lambda *_: self.playNextTrack())
+				self.notify.add_action('media-skip-forward', 'Next track', lambda *_: self.playNextTrack(highlight=False))
 
 		self.pl_pos = -1
 
 		self.win = self.top.p[0]
 
 		try: self.set_token(ym_token)
-		except yandex_music.exceptions.BadRequestError: pass
+		except (yandex_music.exceptions.BadRequestError, yandex_music.exceptions.UnauthorizedError): pass
 		if (not self.user_id): self.win.addView(LoginView())
 
 	def die(self):
@@ -1319,9 +1319,9 @@ class App(SCApp):
 				try: os.remove(path_part)
 				except OSError: pass
 
-	def playTrack(self, t=None, *, cache=True, notify=True, set_pos=True):
+	def playTrack(self, t=None, *, cache=True, highlight=True, notify=True, set_pos=True):
 		if (t is None):
-			r = self.playTrack(self.playlist[self.pl_pos], cache=cache, set_pos=False)
+			r = self.playTrack(self.playlist[self.pl_pos], cache=cache, highlight=highlight, notify=notify, set_pos=False)
 			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
 			return r
 
@@ -1337,7 +1337,7 @@ class App(SCApp):
 			if (cache):
 				cache_folder = os.path.expanduser("~/.cache/YMAudio/audio")
 				os.makedirs(cache_folder, exist_ok=True)
-				path = os.path.join(cache_folder, (self._trackline(t) + (os.path.splitext(url)[1] or '.mp3')))
+				path = os.path.join(cache_folder, (self._trackline(t).replace('/', '|') + (os.path.splitext(url)[1] or '.mp3')))
 				if (not os.path.exists(path)):
 					if (thread := self._track_download_thread): thread.stop()
 					path_fifo = "/tmp/.YMAudio.vlc.fifo"
@@ -1365,23 +1365,23 @@ class App(SCApp):
 		self.track = t
 
 		self.tl_rotate = 0
-		self.selectPlayingTrack()
+		self.selectPlaying(t, highlight=highlight)
 		if (notify): self.notifyPlaying(t)
 		if (self.station): self.ym.rotor_station_feedback_track_started(self.station[0], self.track.track_id, self.station[1])
 
 		return True
 
-	def playNextTrack(self, force_next=False):
+	def playNextTrack(self, *, force_next=False, **kwargs):
 		if (self.station and self.track): (self.ym.rotor_station_feedback_skip if (force_next) else self.ym.rotor_station_feedback_track_finished)(self.station[0], self.track.track_id, self.p.get_position()/1000, self.station[1])
 
 		if (self.play_next):
 			t, pl = self.play_next.pop(0)
 			self.setPlaylist(pl)
-			self.playTrack(t)
+			self.playTrack(t, **kwargs)
 			return
 
 		if (self.repeat and not force_next):
-			self.playTrack(self.track, cache=True, notify=False)
+			self.playTrack(self.track, **parseargs(kwargs, cache=True, notify=False))
 			return
 
 		if (not self.playlist):
@@ -1394,9 +1394,9 @@ class App(SCApp):
 			if (isinstance(t, SCSelectingListView.EmptyItem) or isinstance(t, yandex_music.Track) and t.available is False): self.pl_pos += 1; continue
 			break
 
-		self.playTrack()
+		self.playTrack(**kwargs)
 
-	def playPrevTrack(self):
+	def playPrevTrack(self, **kwargs):
 		if (not self.playlist):
 			if (not isinstance(self.win.top, AudiosView)): return
 			self.setPlaylist(self.win.top.l, pos_min=self.win.top.pl_pos_min)
@@ -1407,22 +1407,22 @@ class App(SCApp):
 			if (isinstance(t, SCSelectingListView.EmptyItem) or isinstance(t, yandex_music.Track) and t.available is False): self.pl_pos -= 1; continue
 			break
 
-		self.playTrack()
+		self.playTrack(**kwargs)
 
-	def selectPlaying(self, x):
+	def selectPlaying(self, x, *, highlight=True):
 		for ii, i in enumerate(self.win.top.l):
 			if (i == x):
 				self.win.top.setSelection(ii)
-				self.win.top.highlightAndScroll(ii)
+				if (highlight): self.win.top.highlightAndScroll(ii)
 				break
 
-	def selectPlayingTrack(self):
+	def selectPlayingTrack(self, **kwargs):
 		if (isinstance(self.win.top, AudiosView)):
-			self.selectPlaying(self.track)
+			self.selectPlaying(self.track, **kwargs)
 
-	def selectPlayingPlaylist(self):
+	def selectPlayingPlaylist(self, **kwargs):
 		if (isinstance(self.win.top, PlaylistsView)):
-			self.selectPlaying(self.playlist)
+			self.selectPlaying(self.playlist, **kwargs)
 
 	def play(self):
 		self.p.play()
@@ -1610,10 +1610,20 @@ def pause(self, c):
 def next(self, c):
 	self.playNextTrack(force_next=True)
 
+@app.onkey('A')
+@app.onkey('Ф')
+def next_nohighlight(self, c):
+	self.playNextTrack(force_next=True, highlight=False)
+
 @app.onkey('z')
 @app.onkey('я')
 def prev(self, c):
 	self.playPrevTrack()
+
+@app.onkey('Z')
+@app.onkey('Я')
+def prev_nohighlight(self, c):
+	self.playPrevTrack(highlight=False)
 
 @app.onkey('s')
 @app.onkey('ы')
@@ -1700,7 +1710,7 @@ def mouse(self, c):
 		elif (bstate == curses.BUTTON1_PRESSED):
 			if (isinstance(qw := self.win.top, QuitView)): self.key(SCKey('\n')); return
 			n = (self.win.top.t + y)
-			if (not self.win.top.is_empty(n)):
+			if (isinstance(self.win.top, AudiosView) and not self.win.top.is_empty(n)):
 				self.win.top.n = n
 				if (time.time() < self.clicked): self.win.top.select(); self.clicked = True
 				self.win.top.touch()
@@ -1715,9 +1725,9 @@ def mouse(self, c):
 			if (bstate in (curses.BUTTON1_PRESSED, curses.BUTTON3_PRESSED, curses.BUTTON3_RELEASED)):
 				self.pause()
 			elif (bstate == curses.BUTTON4_PRESSED):
-				self.playPrevTrack()
+				self.playPrevTrack(highlight=False)
 			elif (bstate == curses.REPORT_MOUSE_POSITION or bstate == 2097152):
-				self.playNextTrack()
+				self.playNextTrack(highlight=False)
 
 		elif (x <= width-12):
 			if (bstate == curses.BUTTON1_PRESSED):
