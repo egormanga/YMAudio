@@ -1,4 +1,4 @@
 [Desktop Entry]
 Type=Application
 Name=YMAudio
-Exec=gnome-terminal --profile='Стандартный (без полосы прокрутки)' --title='YMAudio' -- /bin/bash -ic "python3 -m YMAudio; (( $? != 0 )) && { printf '\e[2m> \e[0m' >&2; read -n1; }"
+Exec=gnome-terminal --profile='Стандартный (без полосы прокрутки)' --title='YMAudio' -- /bin/sh -ic "python3 -m YMAudio || { printf '\e[2m> \e[0m' >&2; read -n1; }"
