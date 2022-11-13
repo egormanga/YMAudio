@@ -1,7 +1,10 @@
-#utils
-#Scurses ~= 2.0.0
+## Manual (just clone repos into this directory):
+#cimg              # https://apps.sdore.me/cimg
+#utils             # https://apps.sdore.me/utils
+#Scurses ~= 2.0.0  # https://apps.sdore.me/Scurses
 
 notify2 ~= 0.3.1
 pygobject ~= 3.42.0
 python-vlc ~= 3.0.12118
 python-dbus ~= 1.2.18
+yandex-music ~= 2.0.0
