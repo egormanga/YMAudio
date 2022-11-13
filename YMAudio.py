@@ -207,7 +207,7 @@ class PlaylistsView(SCLoadingSelectingListView, YMMenuItem):
 	def _color(self, playlist):
 		cover = self.app.get_cover(self._cover_uri(playlist), size=COVER_MIN_SIZE, delayed_view=self)
 		if (not cover): return self._color._noncached(None)
-		return tuple(i*1000//255 for i in cimg.pixel_color(cimg.openimg(cover)))
+		return tuple(i*1000//255 for i in cimg.pixel_color(cover))
 
 	def _pair(self, playlist):
 		if (curses.COLORS < 9 or not curses.can_change_color()): return 0
@@ -408,7 +408,7 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 	def _color(self, track):
 		cover = self.app.get_cover(self._cover_uri(track), size=COVER_MIN_SIZE, delayed_view=self)
 		if (not cover): return self._color._noncached(None)
-		return tuple(i*1000//255 for i in cimg.pixel_color(cimg.openimg(cover)))
+		return tuple(i*1000//255 for i in cimg.pixel_color(cover))
 
 	def _pair(self, track):
 		if (curses.COLORS < 9 or not curses.can_change_color()): return 0
