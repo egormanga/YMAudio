@@ -2,11 +2,19 @@
 # YMAudio: Yandex.Music Audio Player
 
 import vlc, cimg, notify2, requests, webbrowser, setproctitle, yandex_music
-import dbus.service, dbus.mainloop.glib
-from .auth import *
-from gi.repository import GLib
 from Scurses import *
 from utils import *; logstart('YMAudio')
+from .auth import *
+
+try: import notify2
+except ModuleNotFoundError: pass
+else: notify2 = None
+
+try: from gi.repository import GLib
+except ImportError: GLib = None
+else:
+	try: import dbus.service, dbus.mainloop.glib
+	except ModuleNotFoundError: GLib = None
 
 ym_login: str
 ym_pw: str
@@ -25,152 +33,153 @@ def ym_is_unauthorized(ex):
 	try: return ('ownerOtherwiseUserBindingError' in ex.args[0])
 	except (IndexError, KeyError): return False
 
-class MediaPlayer2(dbus.service.Object):
-	class _Properties(SlotsOnly):
-		app: SCApp
+if (GLib is not None):
+	class MediaPlayer2(dbus.service.Object):
+		class _Properties(SlotsOnly):
+			app: SCApp
 
-		def __init__(self, app):
+			def __init__(self, app):
+				self.app = app
+
+			def to_dict(self):
+				return {k: v.fget(self) if (isinstance(v, property)) else v for k, v in inspect.getmembers(self) if not k.startswith('_') and k not in ('app', 'to_dict')}
+
+		class Properties_org_mpris_MediaPlayer2(_Properties):
+			CanQuit = True
+			CanRaise = False
+			HasTrackList = False # TODO
+			Identity = 'YMAudio'
+			SupportedUriSchemes = ['']
+			SupportedMimeTypes = ['']
+
+		class Properties_org_mpris_MediaPlayer2_Player(_Properties):
+			Shuffle = False
+			MinimumRate = 0.1
+			MaximumRate = 10.0
+			CanGoNext = True
+			CanGoPrevious = True
+			CanPlay = True
+			CanPause = True
+			CanSeek = True
+			CanControl = True
+
+			@property
+			def Rate(self):
+				return self.app.p.get_rate()
+
+			@Rate.setter
+			def Rate(self, rate):
+				self.app.p.set_rate(rate)
+
+			@property
+			def Volume(self):
+				return self.app.p.audio_get_volume()/100
+
+			@Volume.setter
+			def Volume(self, volume):
+				self.app.p.audio_set_volume(volume*100)
+
+			@property
+			def PlaybackStatus(self):
+				return ('Playing' if (self.app.p.is_playing()) else 'Paused' if (self.app.track) else 'Stopped')
+
+			@property
+			def LoopStatus(self):
+				return ('Track' if (self.app.repeat) else 'None')
+
+			@LoopStatus.setter
+			def LoopStatus(self, loop):
+				self.app.repeat = (loop != 'None')
+
+			@property
+			def Metadata(self):
+				track = self.app.track
+				return dbus.Dictionary({
+					'mpris:trackid': dbus.ObjectPath(f"/org/mpris/MediaPlayer2/ymaudio/track/{str(track.track_id).replace(':', '_').replace('-', '_')}" if (track) else '/org/mpris/MediaPlayer2/TrackList/NoTrack'),
+					'mpris:length': dbus.Int64(max(0, self.app.p.get_length())*1000),
+					**(S({
+						'mpris:artUrl': self.app.get_cover(track.cover_uri),
+						'xesam:artist': track.artists_name() or ('',),
+						'xesam:title': track.title,
+						'xesam:url': self.app.get_url(track),
+						'xesam:asText': self.app.get_lyrics(track),
+					}).filter(None) if (track) else {}),
+				}, signature='sv')
+
+			@property
+			def Position(self):
+				return dbus.Int64(max(0, self.app.p.get_time())*1000)
+
+			@Position.setter
+			def Position(self, position):
+				self.app.p.set_time(position/1000)
+
+		def __init__(self, app, *args, **kwargs):
+			super().__init__(*args, **kwargs)
 			self.app = app
+			self.properties_org_mpris_MediaPlayer2 = self.Properties_org_mpris_MediaPlayer2(self.app)
+			self.properties_org_mpris_MediaPlayer2_Player = self.Properties_org_mpris_MediaPlayer2_Player(self.app)
 
-		def to_dict(self):
-			return {k: v.fget(self) if (isinstance(v, property)) else v for k, v in inspect.getmembers(self) if not k.startswith('_') and k not in ('app', 'to_dict')}
+		@dbus.service.method('org.mpris.MediaPlayer2')
+		def Raise(self):
+			pass
 
-	class Properties_org_mpris_MediaPlayer2(_Properties):
-		CanQuit = True
-		CanRaise = False
-		HasTrackList = False # TODO
-		Identity = 'YMAudio'
-		SupportedUriSchemes = ['']
-		SupportedMimeTypes = ['']
+		@dbus.service.method('org.mpris.MediaPlayer2')
+		def Quit(self):
+			self.app.quit()
 
-	class Properties_org_mpris_MediaPlayer2_Player(_Properties):
-		Shuffle = False
-		MinimumRate = 0.1
-		MaximumRate = 10.0
-		CanGoNext = True
-		CanGoPrevious = True
-		CanPlay = True
-		CanPause = True
-		CanSeek = True
-		CanControl = True
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def Next(self):
+			self.app.playNextTrack(highlight=False)
 
-		@property
-		def Rate(self):
-			return self.app.p.get_rate()
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def Previous(self):
+			self.app.playPrevTrack(highlight=False)
 
-		@Rate.setter
-		def Rate(self, rate):
-			self.app.p.set_rate(rate)
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def Pause(self):
+			self.app.pause()
 
-		@property
-		def Volume(self):
-			return self.app.p.audio_get_volume()/100
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def PlayPause(self):
+			self.app.playPause()
 
-		@Volume.setter
-		def Volume(self, volume):
-			self.app.p.audio_set_volume(volume*100)
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def Stop(self):
+			self.app.stop()
 
-		@property
-		def PlaybackStatus(self):
-			return 'Playing' if (self.app.p.is_playing()) else 'Paused' if (self.app.track) else 'Stopped'
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def Play(self):
+			self.app.play()
 
-		@property
-		def LoopStatus(self):
-			return 'Track' if (self.app.repeat) else 'None'
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def Seek(self, offset):
+			self.properties_org_mpris_MediaPlayer2_Player.Position += offset
 
-		@LoopStatus.setter
-		def LoopStatus(self, loop):
-			self.app.repeat = (loop != 'None')
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def SetPosition(self, trackid, position):
+			self.properties_org_mpris_MediaPlayer2_Player.Position = position
 
-		@property
-		def Metadata(self):
-			track = self.app.track
-			return dbus.Dictionary({
-				'mpris:trackid': dbus.ObjectPath(f"/org/mpris/MediaPlayer2/ymaudio/track/{str(track.track_id).replace(':', '_').replace('-', '_')}" if (track) else '/org/mpris/MediaPlayer2/TrackList/NoTrack'),
-				'mpris:length': dbus.Int64(max(0, self.app.p.get_length())*1000),
-				**(S({
-					'mpris:artUrl': self.app.get_cover(track.cover_uri),
-					'xesam:artist': track.artists_name() or ('',),
-					'xesam:title': track.title,
-					'xesam:url': self.app.get_url(track),
-					'xesam:asText': self.app.get_lyrics(track),
-				}).filter(None) if (track) else {}),
-			}, signature='sv')
+		@dbus.service.method('org.mpris.MediaPlayer2.Player')
+		def OpenUri(self, uri):
+			pass
 
-		@property
-		def Position(self):
-			return dbus.Int64(max(0, self.app.p.get_time())*1000)
+		@dbus.service.method(dbus.PROPERTIES_IFACE, in_signature='ss', out_signature='v')
+		def Get(self, interface, prop):
+			return getattr(getattr(self, 'properties_'+interface.replace('.', '_')), prop)
 
-		@Position.setter
-		def Position(self, position):
-			self.app.p.set_time(position/1000)
+		@dbus.service.method(dbus.PROPERTIES_IFACE, in_signature='s', out_signature='a{sv}')
+		def GetAll(self, interface):
+			return getattr(self, 'properties_'+interface.replace('.', '_')).to_dict()
 
-	def __init__(self, app, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		self.app = app
-		self.properties_org_mpris_MediaPlayer2 = self.Properties_org_mpris_MediaPlayer2(self.app)
-		self.properties_org_mpris_MediaPlayer2_Player = self.Properties_org_mpris_MediaPlayer2_Player(self.app)
+		@dbus.service.method(dbus.PROPERTIES_IFACE, in_signature='ssv')
+		def Set(self, interface, prop, value):
+			setattr(getattr(self, 'properties_'+interface.replace('.', '_')), prop, value)
+			self.PropertiesChanged(interface, {prop: value}, [])
 
-	@dbus.service.method('org.mpris.MediaPlayer2')
-	def Raise(self):
-		pass
-
-	@dbus.service.method('org.mpris.MediaPlayer2')
-	def Quit(self):
-		self.app.quit()
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def Next(self):
-		self.app.playNextTrack(highlight=False)
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def Previous(self):
-		self.app.playPrevTrack(highlight=False)
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def Pause(self):
-		self.app.pause()
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def PlayPause(self):
-		self.app.playPause()
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def Stop(self):
-		self.app.stop()
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def Play(self):
-		self.app.play()
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def Seek(self, offset):
-		self.properties_org_mpris_MediaPlayer2_Player.Position += offset
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def SetPosition(self, trackid, position):
-		self.properties_org_mpris_MediaPlayer2_Player.Position = position
-
-	@dbus.service.method('org.mpris.MediaPlayer2.Player')
-	def OpenUri(self, uri):
-		pass
-
-	@dbus.service.method(dbus.PROPERTIES_IFACE, in_signature='ss', out_signature='v')
-	def Get(self, interface, prop):
-		return getattr(getattr(self, 'properties_'+interface.replace('.', '_')), prop)
-
-	@dbus.service.method(dbus.PROPERTIES_IFACE, in_signature='s', out_signature='a{sv}')
-	def GetAll(self, interface):
-		return getattr(self, 'properties_'+interface.replace('.', '_')).to_dict()
-
-	@dbus.service.method(dbus.PROPERTIES_IFACE, in_signature='ssv')
-	def Set(self, interface, prop, value):
-		setattr(getattr(self, 'properties_'+interface.replace('.', '_')), prop, value)
-		self.PropertiesChanged(interface, {prop: value}, [])
-
-	@dbus.service.signal(dbus.PROPERTIES_IFACE, signature='sa{sv}as')
-	def PropertiesChanged(self, interface, changed_props, invalidated_props):
-		pass
+		@dbus.service.signal(dbus.PROPERTIES_IFACE, signature='sa{sv}as')
+		def PropertiesChanged(self, interface, changed_props, invalidated_props):
+			pass
 
 class YMAudioView(SCVSplitView):
 	def __init__(self):
@@ -1144,17 +1153,16 @@ class App(SCApp):
 		self.p.get_instance().log_unset()
 		self.p.audio_set_volume(100)
 
-		try: self.glib_eventloop = GLib.MainLoop()
-		except NameError: pass
-		else:
+		if (GLib is not None):
+			self.glib_eventloop = GLib.MainLoop()
 			self.dbus_eventloop = dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 			threading.Thread(target=self.glib_eventloop.run, daemon=True).start()
 			self.dbus = dbus.SessionBus()
 			self.mpris = MediaPlayer2(self, dbus.service.BusName('org.mpris.MediaPlayer2.ymaudio', bus=self.dbus), '/org/mpris/MediaPlayer2')
-			self.update_all()
+			self.mpris_update_all()
 
-		if (self.mpris is None):
-			try: raise notify2.init('YMAudio')
+		if (notify2 is not None and self.mpris is None):
+			try: notify2.init('YMAudio')
 			except Exception: pass
 			else:
 				self.notify = notify2.Notification('', icon='media-playback-start')
@@ -1180,7 +1188,7 @@ class App(SCApp):
 		try: self.stop()
 		except Exception: pass
 
-		try: self.update_all()
+		try: self.mpris_update_all()
 		except Exception: pass
 
 	_lastproc = int()
@@ -1193,20 +1201,21 @@ class App(SCApp):
 			if (time.time()-self._lastproc >= 0.1):
 				self._lastproc = time.time()
 
-				pb = self.mpris.properties_org_mpris_MediaPlayer2_Player.PlaybackStatus
-				if (pb != self._lastpb):
-					self._lastpb = pb
-					self.update_properties(PlaybackStatus=pb)
+				if (self.mpris is not None):
+					pb = self.mpris.properties_org_mpris_MediaPlayer2_Player.PlaybackStatus
+					if (pb != self._lastpb):
+						self._lastpb = pb
+						self.mpris_update_properties(PlaybackStatus=pb)
 
-				md = self.mpris.properties_org_mpris_MediaPlayer2_Player.Metadata
-				if (md != self._lastmd):
-					self._lastmd = md
-					self.update_properties(Metadata=md)
+					md = self.mpris.properties_org_mpris_MediaPlayer2_Player.Metadata
+					if (md != self._lastmd):
+						self._lastmd = md
+						self.mpris_update_properties(Metadata=md)
 
-				pos = self.mpris.properties_org_mpris_MediaPlayer2_Player.Position
-				if (abs(pos-self._lastpos) > 500*1000):
-					self._lastpos = pos
-					if (self.p.is_playing()): self.update_properties(Position=pos)
+					pos = self.mpris.properties_org_mpris_MediaPlayer2_Player.Position
+					if (abs(pos-self._lastpos) > 500*1000):
+						self._lastpos = pos
+						if (self.p.is_playing()): self.mpris_update_properties(Position=pos)
 
 			state = self.p.get_state()
 			if (self.p.get_length() > 0 and state == vlc.State.Ended):
@@ -1426,17 +1435,17 @@ class App(SCApp):
 
 	def play(self):
 		self.p.play()
-		self.update_properties('PlaybackStatus', 'Metadata', 'Position')
+		self.mpris_update_properties('PlaybackStatus', 'Metadata', 'Position')
 		self.top.p[1].top.touch()
 
 	def pause(self):
 		self.p.pause()
-		self.update_properties('PlaybackStatus')
+		self.mpris_update_properties('PlaybackStatus')
 		self.top.p[1].top.touch()
 
 	def playPause(self):
 		self.p.pause()
-		self.update_properties('PlaybackStatus')
+		self.mpris_update_properties('PlaybackStatus')
 		self.top.p[1].top.touch()
 
 	def stop(self):
@@ -1448,7 +1457,7 @@ class App(SCApp):
 		if (self.station and self.track): self.ym.rotor_station_feedback_track_finished(self.station[0], self.track.track_id, self.p.get_position()/1000, self.station[1])
 
 		self.track = None
-		self.update_properties('PlaybackStatus', 'Metadata')
+		self.mpris_update_properties('PlaybackStatus', 'Metadata')
 
 		self.win.top.unselect()
 		self.win.top.touch()
@@ -1457,7 +1466,7 @@ class App(SCApp):
 	def setPosition(self, position):
 		if (not self.p.is_playing()): return
 		self.p.set_position(position)
-		self.update_properties('Position')
+		self.mpris_update_properties('Position')
 		self.top.p[1].top.touch()
 
 	def setPlaylist(self, playlist, pos=-1, pos_min=0, *, station=None):
@@ -1473,7 +1482,7 @@ class App(SCApp):
 
 	def toggleRepeat(self):
 		self.repeat = not self.repeat
-		self.update_properties('LoopStatus')
+		self.mpris_update_properties('LoopStatus')
 		self.top.p[1].top.touch()
 
 	def seekRew(self):
@@ -1488,13 +1497,17 @@ class App(SCApp):
 			self.notify.show()
 		except Exception: pass
 
-	def update_properties(self, *invalidated_props, **changed_props):
+	def mpris_update_properties(self, *invalidated_props, **changed_props):
+		if (self.mpris is None): return False
 		o = self.mpris.properties_org_mpris_MediaPlayer2_Player
 		changed_props.update({i: (lambda v: v.fget(o) if (isinstance(v, property)) else v)(getattr(o, i)) for i in invalidated_props if i not in changed_props})
 		self.mpris.PropertiesChanged('org.mpris.MediaPlayer2.Player', changed_props, [])
+		return True
 
-	def update_all(self):
+	def mpris_update_all(self):
+		if (self.mpris is None): return False
 		self.mpris.PropertiesChanged('org.mpris.MediaPlayer2.Player', self.mpris.properties_org_mpris_MediaPlayer2_Player.to_dict(), [])
+		return True
 
 	def clear_cache(self):
 		try: del self.favourites
@@ -1538,7 +1551,7 @@ class App(SCApp):
 	@track.setter
 	def track(self, track: yandex_music.Track):
 		self._track = track
-		self.update_properties('Metadata')
+		self.mpris_update_properties('Metadata')
 
 	@staticmethod
 	def _trackline(track: yandex_music.Track) -> str:
