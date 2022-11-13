@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # YMAudio: Yandex.Music Audio Player
 
-import vlc, cimg, notify2, webbrowser, yandex_music
+import vlc, cimg, notify2, requests, webbrowser, setproctitle, yandex_music
 import dbus.service, dbus.mainloop.glib
 from .auth import *
 from gi.repository import GLib
