@@ -404,7 +404,11 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 			try: t = self.l[self.n]
 			except IndexError: pass
 			else:
-				if (t.lyrics_available): self.app.win.addView(LyricsView(t.get_supplement().lyrics))
+				if (t.lyrics_available):
+					lyrics = t.get_supplement().lyrics
+					if (lyrics is not None):
+						if (isinstance(self.app.win.top, LyricsView)): self.app.win.top.die()
+						self.app.win.addView(LyricsView(lyrics))
 		else: return super().key(c)
 		return True
 
@@ -1121,7 +1125,7 @@ class App(SCApp):
 	notify: None
 
 	# internal:
-	_track: dict
+	_track: ...
 	_lastproc: ...
 	_lastpb: ...
 	_lastmd: ...
@@ -1544,6 +1548,7 @@ class App(SCApp):
 	def unfavourites(self) -> yandex_music.TracksList:
 		return self.ym.users_dislikes_tracks()
 
+	_track = None
 	@property
 	def track(self) -> yandex_music.Track:
 		return self._track
@@ -1648,6 +1653,15 @@ def stop(self, c):
 @app.onkey('к')
 def repeat(self, c):
 	self.toggleRepeat()
+
+@app.onkey('L')
+@app.onkey('Д')
+def lyrics(self, c):
+	if ((t := self.track) and t.lyrics_available):
+		lyrics = t.get_supplement().lyrics
+		if (lyrics is not None):
+			if (isinstance(self.win.top, LyricsView)): self.win.top.die()
+			self.win.addView(LyricsView(lyrics))
 
 @app.onkey('+')
 def like(self, c):
