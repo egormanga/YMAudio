@@ -25,7 +25,7 @@ db.setbackup(False)
 db.setsensitive(True)
 db.register('ym_login', 'ym_pw', 'ym_token')
 
-yandex_music.Client.notice_displayed = True
+yandex_music.Client._Client__notice_displayed = True
 
 COVER_MIN_SIZE = '30x30'
 
@@ -77,7 +77,7 @@ if (GLib is not None):
 
 			@Volume.setter
 			def Volume(self, volume):
-				self.app.p.audio_set_volume(volume*100)
+				self.app.p.audio_set_volume(int(volume*100))
 
 			@property
 			def PlaybackStatus(self):
@@ -101,7 +101,7 @@ if (GLib is not None):
 						'mpris:artUrl': self.app.get_cover(track.cover_uri),
 						'xesam:artist': track.artists_name() or ('',),
 						'xesam:title': track.title,
-						'xesam:url': self.app.get_url(track),
+						'xesam:url': self.app.get_url(track)[0],
 						'xesam:asText': self.app.get_lyrics(track),
 					}).filter(None) if (track) else {}),
 				}, signature='sv')
@@ -113,6 +113,7 @@ if (GLib is not None):
 			@Position.setter
 			def Position(self, position):
 				self.app.p.set_time(position/1000)
+				self.mpris.Seeked(self.Position)
 
 		def __init__(self, app, *args, **kwargs):
 			super().__init__(*args, **kwargs)
@@ -181,6 +182,10 @@ if (GLib is not None):
 		def PropertiesChanged(self, interface, changed_props, invalidated_props):
 			pass
 
+		@dbus.service.signal('org.mpris.MediaPlayer2.Player')
+		def Seeked(self, position):
+			pass
+
 class YMAudioView(SCVSplitView):
 	def __init__(self):
 		super().__init__(0, 2)
@@ -226,7 +231,7 @@ class PlaylistsView(SCLoadingSelectingListView, YMMenuItem):
 		color = 9 #random.randrange(9, curses.COLORS)
 		curses.init_color(color, r, g, b)
 		pair = 2 #random.randrange(9, curses.COLORS)
-		curses.init_pair(pair, color, curses.COLOR_WHITE if (max(r, g, b) < 500) else curses.COLOR_BLACK)
+		curses.init_pair(pair, color, (curses.COLOR_WHITE if (max(r, g, b) < 500) else curses.COLOR_BLACK))
 		return curses.color_pair(pair)
 
 	def draw(self, stdscr):
@@ -285,7 +290,7 @@ class AlbumsView(PlaylistsView):
 	menu_label = "Альбомы"
 
 	# public:
-	l: list[yandex_music.Album]
+	l: list[yandex_music.Album | yandex_music.Playlist]
 
 	@staticmethod
 	def _cover_uri(album: yandex_music.Album):
@@ -344,7 +349,7 @@ class AlbumsView(PlaylistsView):
 	def load(self):
 		ret = super(PlaylistsView, self).load()
 		if (not ret):
-			if (not self.l): self.l += [i.album for i in self.app.ym.users_likes_albums()]
+			if (not self.l): self.l += (i.album for i in self.app.ym.users_likes_albums())
 			self.l.append(self.LoadItem(False))
 		return ret
 
@@ -396,9 +401,9 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 			else:
 				curses.def_prog_mode()
 				curses.endwin()
-				url = self.app.get_url(t)
+				url, ext = self.app.get_url(t)
 				print(f"Downloading: {url}")
-				os.system(f"""wget {repr(url)} -O {repr(f"{', '.join(t.artists_name())} - {t.title}.mp3")} -q --show-progress""")
+				os.system(f"""wget {repr(url)} -O {repr(f"{', '.join(t.artists_name())} - {t.title}.{ext}")} -q --show-progress""")
 				curses.reset_prog_mode()
 		elif (c == 'l' or c == 'д'):
 			try: t = self.l[self.n]
@@ -507,8 +512,10 @@ class AudiosView(SCLoadingSelectingListView, YMMenuItem):
 				if (self.playlist is None): self.playlist = self.app.favourites
 				try: tracks = sum(self.playlist.volumes, start=[])
 				except AttributeError: tracks = self.playlist.fetch_tracks()
-				self.l += [(i.track if (isinstance(i, yandex_music.TrackShort)) else i) or i.fetch_track() for i in tracks]
-				if (self.autoplay and len(self.l) == 1): self.select(); self.autoplay = False
+				self.l += ((i.track if (isinstance(i, yandex_music.TrackShort)) else i) or i.fetch_track() for i in tracks)
+				if (self.autoplay and len(self.l) == 1):
+					if (not self.app.p.will_play()): self.select()
+					self.autoplay = False
 				self.l.append(self.LoadItem(False))
 		return ret
 
@@ -719,12 +726,12 @@ class SearchView(AudiosView, AlbumsView, ArtistsView, YMMenuItem):
 			try:
 				if (self.search is None): self.search = self.app.ym.search(self.query)
 				#else: self.search = self.search.next_page() # TODO FIXME: TypeError
-			except (yandex_music.exceptions.BadRequestError): pass
+			except yandex_music.exceptions.BadRequestError: pass
 			else:
-				if (self.search.best is not None): l += [self.search.best.result, self.EmptyItem()]
-				if (self.search.playlists is not None): l += [i for i in self.search.playlists.results if i not in l]
-				if (self.search.albums is not None): l += [i for i in self.search.albums.results if i not in l]
-				if (self.search.tracks is not None): l += [i for i in self.search.tracks.results if i not in l]
+				if (self.search.best is not None): l += (self.search.best.result, self.EmptyItem())
+				if (self.search.playlists is not None): l += (i for i in self.search.playlists.results if i not in l)
+				if (self.search.albums is not None): l += (i for i in self.search.albums.results if i not in l)
+				if (self.search.tracks is not None): l += (i for i in self.search.tracks.results if i not in l)
 
 			self.l += l
 			self.l.append(self.LoadItem(False)) #bool(l))) # TODO FIXME
@@ -774,14 +781,14 @@ class MenuRecommsView(AudiosView):
 				elif (isinstance(t, yandex_music.Track)):
 					if (self.app.playlist is not self.l): self.app.ym.rotor_station_feedback_radio_started(self.station, self.from_)
 					self.app.setPlaylist(self.l, self.n, self.pl_pos_min, station=(self.station, self.batch_id))
-					self.app.playTrack(cache=False)
+					self.app.playTrack() #cache=False) # TODO FIXME: /aac256 →  .mp3/mp123 (?)
 					ret = True
 		return ret
 
 	def load(self):
 		ret = super(AudiosView, self).load()
 		if (not ret):
-			r = self.app.ym.rotor_station_tracks(self.station, queue=self.app.track.track_id if (self.app.track) else None)
+			r = self.app.ym.rotor_station_tracks(self.station, queue=(self.app.track.track_id if (self.app.track) else None))
 
 			for i in r.sequence:
 				if (i.track not in self.l): self.l.append(i.track)
@@ -866,7 +873,10 @@ class ProgressView(SCView):
 			pp = min(1, self.app.p.get_position())
 			pgrstr = (self.app.strfTime(pt/1000), (self.app.strfTime(max(0, pl)/1000) if (pl != 0) else '--:--'), self.tm)
 			bar = Progress.format_bar(pp, 1, self.width - len(str().join(pgrstr))-4, border='')
-			icons = '↺'*self.repeat
+			icons = (
+				'↺ '*self.repeat +
+				('💿📀'[self.app.codec == 'flac'] if (self.app.codec and self.app.codec != 'mp3') else '')
+			).strip()
 			if (icons): icons = ' '+icons
 			stdscr.addstr(0, 1, S(self.app.trackline).cyclefit(self.width-2 - len(icons), self.app.tl_rotate, start_delay=10).ljust(self.width-2 - len(icons))+icons, curses.A_UNDERLINE)
 			stdscr.addstr(1, 1, pgrstr[0], curses.A_BLINK*self.paused)
@@ -1115,6 +1125,7 @@ class App(SCApp):
 	pl_pos: int
 	pl_pos_min: int
 	pl_peer: int
+	codec: str
 	loaded: float
 	error: None
 	clicked: bool
@@ -1155,7 +1166,7 @@ class App(SCApp):
 		self.auth = YMAuthWeb()
 
 		self.p.get_instance().log_unset()
-		self.p.audio_set_volume(100)
+		#self.p.audio_set_volume(100)
 
 		if (GLib is not None):
 			self.glib_eventloop = GLib.MainLoop()
@@ -1254,8 +1265,20 @@ class App(SCApp):
 		return first((i for i in self.ym.search_suggest(part).suggestions if i.casefold().startswith(part.casefold()) and i.casefold() != part.casefold()), default=part)
 
 	@cachedfunction
-	def get_url(self, track: yandex_music.Track):
-		return max(track.get_download_info(), key=operator.attrgetter('bitrate_in_kbps')).get_direct_link()
+	def get_url(self, track: yandex_music.Track, *, lossless=True) -> (str, str):
+		if (lossless):
+			self.ym._request.headers['X-Yandex-Music-Client'] = "YandexMusicDesktopAppWindows/5.13.2"
+			try: return S(self.ym._request.get(f"{self.ym.base_url}/get-file-info", params={
+				'ts': (ts := int(datetime.datetime.now().timestamp())),
+				'trackId': track.id,
+				'quality': 'lossless',
+				'codecs': 'flac,aac,he-aac,mp3',
+				'transports': 'raw',
+				'sign': base64.b64encode(hmac.new(b"kzqU4XhfCaY6B6JTHODeq5", f"{ts}{track.id}losslessflacaache-aacmp3raw".encode(), 'sha256').digest()).decode()[:-1],
+			})['download_info'])@('url', 'codec')
+			finally: del self.ym._request.headers['X-Yandex-Music-Client']
+
+		return (max(track.get_download_info(), key=operator.attrgetter('bitrate_in_kbps')).get_direct_link(), 'mp3')
 
 	@cachedfunction
 	def get_lyrics(self, track: yandex_music.Track):
@@ -1332,7 +1355,40 @@ class App(SCApp):
 				try: os.remove(path_part)
 				except OSError: pass
 
-	def playTrack(self, t=None, *, cache=True, highlight=True, notify=True, set_pos=True):
+	def submitPlayback(self, track=None, *, album=None, playlist=None, length=None, position=None, stopped: bool = False, skipped: bool = False, finished: bool = False, timestamp: datetime.datetime = None, force_next=False, from_cache=False):
+		if (not (track or self.track)): return
+
+		if (track is None): track = self.track
+		if (album is None):
+			try: album = first(track.albums) # TODO FIXME
+			except StopIteration: return
+		#if (playlist is None): playlist = self.playlist # TODO
+		if (length is None): length = self.p.get_length()/1000
+		if (position is None): position = self.p.get_position()/1000
+		if (timestamp is None): timestamp = datetime.datetime.now()
+
+		self.ym.play_audio(
+			track_id = track.track_id,
+			from_ = 'YMAudio',
+			album_id = album.id,
+			**({'playlist_id': playlist.playlist_id} if (playlist is not None) else {}),
+			from_cache = from_cache,
+			timestamp = timestamp.astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+			track_length_seconds = int(length),
+			total_played_seconds = int(position),
+			**({'end_position_seconds': int(position)} if (stop or skip) else {}),
+			client_now = datetime.datetime.now().astimezone(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+		)
+
+		if (self.station):
+			try:
+				if (stopped or finished): self.ym.rotor_station_feedback_track_finished(self.station[0], track.track_id, position, self.station[1])
+				elif (skipped): self.ym.rotor_station_feedback_skip(self.station[0], track.track_id, position, self.station[1])
+				else: self.ym.rotor_station_feedback_track_started(self.station[0], track.track_id, self.station[1])
+			except Exception as ex:
+				self.error = ex
+
+	def playTrack(self, t=None, *, cache=True, use_cache=True, highlight=True, notify=True, set_pos=True):
 		if (t is None):
 			r = self.playTrack(self.playlist[self.pl_pos], cache=cache, highlight=highlight, notify=notify, set_pos=False)
 			if (self.station and isinstance(self.win.top, MenuRecommsView)): self.win.top.load()
@@ -1346,28 +1402,40 @@ class App(SCApp):
 		self.stop()
 
 		try:
-			url = self.get_url(t)
-			if (cache):
+			url, self.codec = self.get_url(t)
+
+			if (use_cache):
 				cache_folder = os.path.expanduser("~/.cache/YMAudio/audio")
 				os.makedirs(cache_folder, exist_ok=True)
-				path = os.path.join(cache_folder, (self._trackline(t).replace('/', '|') + (os.path.splitext(url)[1] or '.mp3')))
-				if (not os.path.exists(path)):
-					if (thread := self._track_download_thread): thread.stop()
-					path_fifo = "/tmp/.YMAudio.vlc.fifo"
-					if (not os.path.exists(path_fifo)): os.mkfifo(path_fifo)
-					def _step_cb(step, length):
-						self.loaded = step/length
-					def _done_cb(path):
-						pos = self.p.get_time()
-						self.p.set_mrl(path)
-						self.p.play()
-						self.p.set_time(pos)
-					self.loaded = 0
-					thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'step_callback': _step_cb, 'done_callback': _done_cb}, daemon=True)
-					thread.start()
-					path = path_fifo
-				else: self.loaded = True
-			else: path = url; self.loaded = True
+
+				path = os.path.join(cache_folder, f"{self._trackline(t).replace('/', '|')}.{self.codec}")
+
+				if (cache):
+					if (not os.path.exists(path)):
+						# TODO FIXME: duplicate stream using libvlc itself
+						if (thread := self._track_download_thread): thread.stop()
+
+						path_fifo = "/tmp/.YMAudio.vlc.fifo"
+						if (not os.path.exists(path_fifo)): os.mkfifo(path_fifo)
+
+						def _step_cb(step, length):
+							self.loaded = (step / length)
+
+						def _done_cb(path):
+							pos = self.p.get_time()
+							self.p.set_mrl(path)
+							self.p.play()
+							self.p.set_time(pos)
+
+						self.loaded = 0
+
+						thread = self._track_download_thread = StoppableThread(target=self._download_track, args=(url, path), kwargs={'path_fifo': path_fifo, 'step_callback': _step_cb, 'done_callback': _done_cb}, daemon=True)
+						thread.start()
+
+						path = path_fifo
+					else: self.loaded = True
+			else: path = url
+
 			self.p.set_mrl(path)
 			self.play()
 		except Exception as ex:
@@ -1376,16 +1444,16 @@ class App(SCApp):
 			return False
 
 		self.track = t
+		self.submitPlayback(from_cache=(cache and self.loaded))
 
 		self.tl_rotate = 0
 		self.selectPlaying(t, highlight=highlight)
 		if (notify): self.notifyPlaying(t)
-		if (self.station): self.ym.rotor_station_feedback_track_started(self.station[0], self.track.track_id, self.station[1])
 
 		return True
 
 	def playNextTrack(self, *, force_next=False, **kwargs):
-		if (self.station and self.track): (self.ym.rotor_station_feedback_skip if (force_next) else self.ym.rotor_station_feedback_track_finished)(self.station[0], self.track.track_id, self.p.get_position()/1000, self.station[1])
+		self.submitPlayback(**{('skipped' if (force_next) else 'finished'): True})
 
 		if (self.play_next):
 			t, pl = self.play_next.pop(0)
@@ -1394,7 +1462,8 @@ class App(SCApp):
 			return
 
 		if (self.repeat and not force_next):
-			self.playTrack(self.track, **parseargs(kwargs, cache=True, notify=False))
+			parseargs(kwargs, cache=True, notify=False)
+			self.playTrack(self.track, **kwargs)
 			return
 
 		if (not self.playlist):
@@ -1423,11 +1492,12 @@ class App(SCApp):
 		self.playTrack(**kwargs)
 
 	def selectPlaying(self, x, *, highlight=True):
-		for ii, i in enumerate(self.win.top.l):
-			if (i == x):
-				self.win.top.setSelection(ii)
-				if (highlight): self.win.top.highlightAndScroll(ii)
-				break
+		if (isinstance(self.win.top, AudiosView)):
+			for ii, i in enumerate(self.win.top.l):
+				if (i == x):
+					self.win.top.setSelection(ii)
+					if (highlight): self.win.top.highlightAndScroll(ii)
+					break
 
 	def selectPlayingTrack(self, **kwargs):
 		if (isinstance(self.win.top, AudiosView)):
@@ -1458,12 +1528,12 @@ class App(SCApp):
 
 		if (self.notify is not None): self.notify.close()
 		if (self._track_download_thread is not None): self._track_download_thread.stop()
-		if (self.station and self.track): self.ym.rotor_station_feedback_track_finished(self.station[0], self.track.track_id, self.p.get_position()/1000, self.station[1])
+		self.submitPlayback(self.track, stopped=True)
 
 		self.track = None
 		self.mpris_update_properties('PlaybackStatus', 'Metadata')
 
-		self.win.top.unselect()
+		if (isinstance(self.win.top, SCSelectingListView)): self.win.top.unselect()
 		self.win.top.touch()
 		if (self.views): self.top.p[1].top.touch()
 
@@ -1471,6 +1541,7 @@ class App(SCApp):
 		if (not self.p.is_playing()): return
 		self.p.set_position(position)
 		self.mpris_update_properties('Position')
+		self.mpris.Seeked(self.mpris.properties_org_mpris_MediaPlayer2_Player.Position)
 		self.top.p[1].top.touch()
 
 	def setPlaylist(self, playlist, pos=-1, pos_min=0, *, station=None):
@@ -1490,10 +1561,10 @@ class App(SCApp):
 		self.top.p[1].top.touch()
 
 	def seekRew(self):
-		self.setPosition(self.p.get_position()-0.01)
+		self.setPosition(self.p.get_position() - 0.01)
 
 	def seekFwd(self):
-		self.setPosition(self.p.get_position()+0.01)
+		self.setPosition(self.p.get_position() + 0.01)
 
 	def notifyPlaying(self, t):
 		try:
@@ -1728,7 +1799,7 @@ def mouse(self, c):
 			self.win.top.t = max(self.win.top.t-3, 0)
 			self.win.top.touch()
 		elif (bstate == curses.REPORT_MOUSE_POSITION or bstate == 2097152):
-			if (len(getattr(self.win.top, 'l', ())) > height):
+			if (isinstance(self.win.top, SCListView) and len(self.win.top.l) > height):
 				self.win.top.t = min(self.win.top.t+3, len(self.win.top.l) - height+2)
 				self.win.top.touch()
 			elif (isinstance(self.win.top, LyricsView)):
@@ -1737,7 +1808,7 @@ def mouse(self, c):
 		elif (bstate == curses.BUTTON1_PRESSED):
 			if (isinstance(qw := self.win.top, QuitView)): self.key(SCKey('\n')); return
 			n = (self.win.top.t + y)
-			if (isinstance(self.win.top, AudiosView) and not self.win.top.is_empty(n)):
+			if (isinstance(self.win.top, SCLoadingSelectingListView) and not self.win.top.is_empty(n)):
 				self.win.top.n = n
 				if (time.time() < self.clicked): self.win.top.select(); self.clicked = True
 				self.win.top.touch()
@@ -1765,12 +1836,13 @@ def mouse(self, c):
 				self.seekFwd()
 
 def main():
-	global app
 	setproctitle.setproctitle('YMAudio')
 	db.load()
+
 	app.addView(YMAudioView())
+
 	try: app.run()
 	except KeyboardInterrupt as ex: exit(ex)
 
-# by Sdore, 2022
+# by Sdore, 2022-24
 #  www.sdore.me
